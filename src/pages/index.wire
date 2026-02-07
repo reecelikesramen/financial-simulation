@@ -1,15 +1,178 @@
-count = wire(0)
+import json
+from src.financial_data import (
+    get_inflation_data,
+    get_sp500_returns,
+    get_us_total_market_returns,
+    get_global_market_returns
+)
 
-def increment():
-    print("Incrementing count")
-    $count += 1
+# Fetch financial data
+inflation_data = get_inflation_data(years=20)
+sp500_data = get_sp500_returns(years=20)
+us_total_data = get_us_total_market_returns(years=20)
+global_data = get_global_market_returns(years=20)
 
----html---
+# Find common date range across all datasets
+all_dates = [
+    set(inflation_data['dates']),
+    set(sp500_data['dates']),
+    set(us_total_data['dates']),
+    set(global_data['dates'])
+]
+common_dates = sorted(list(set.intersection(*all_dates)))
+
+# Filter each dataset to only include common dates
+def filter_to_dates(data, target_dates):
+    indices = [i for i, date in enumerate(data['dates']) if date in target_dates]
+    return {
+        'dates': [data['dates'][i] for i in indices],
+        'values': [data['values'][i] for i in indices]
+    }
+
+inflation_data = filter_to_dates(inflation_data, set(common_dates))
+sp500_data = filter_to_dates(sp500_data, set(common_dates))
+us_total_data = filter_to_dates(us_total_data, set(common_dates))
+global_data = filter_to_dates(global_data, set(common_dates))
+
+# Prepare JSON strings for JavaScript
+inflation_json = json.dumps(inflation_data)
+sp500_json = json.dumps(sp500_data)
+us_total_json = json.dumps(us_total_data)
+global_json = json.dumps(global_data)
+
+--- html ---
+
+<div id="chart-data" style="display: none;"
+     data-inflation='{inflation_json}'
+     data-sp500='{sp500_json}'
+     data-us-total='{us_total_json}'
+     data-global='{global_json}'>
+</div>
+
 <section>
-    <h1>Counter</h1>
-    <p>{count.value}</p>
-    <input></input>
-    <Counter />
-    <button @click={increment}>Increment Function</button>
-    <!-- <a role="button" href="/pricing">View pricing</a> -->
+    <h1>Financial Dashboard</h1>
+    <p>Growth of $1 invested over the past 20 years, including the effect of inflation.</p>
+
+    <div style="margin-bottom: 3rem;">
+        <h2>Compounded Growth of $1 Invested</h2>
+        <div style="position: relative; height: 500px;">
+            <canvas id="combinedChart"></canvas>
+        </div>
+    </div>
 </section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+    window.addEventListener('load', function() {
+        // Parse data from Python
+        const chartDataEl = document.getElementById('chart-data');
+        const inflationData = JSON.parse(chartDataEl.dataset.inflation);
+        const sp500Data = JSON.parse(chartDataEl.dataset.sp500);
+        const usTotalData = JSON.parse(chartDataEl.dataset.usTotal);
+        const globalData = JSON.parse(chartDataEl.dataset.global);
+
+        // Combined Chart
+        const ctx = document.getElementById('combinedChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: sp500Data.dates,
+                datasets: [
+                    {
+                        label: 'S&P 500',
+                        data: sp500Data.values,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'US Total Market',
+                        data: usTotalData.values,
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'Global Market',
+                        data: globalData.values,
+                        borderColor: 'rgb(153, 102, 255)',
+                        backgroundColor: 'rgba(153, 102, 255, 0.1)',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'Cost of Living',
+                        data: inflationData.values,
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        borderWidth: 3,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        borderDash: [5, 5]
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                    },
+                    title: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': $';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += context.parsed.y.toFixed(2);
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Value of $1 Invested'
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Year'
+                        }
+                    }
+                }
+            }
+        });
+    });
+</script>
