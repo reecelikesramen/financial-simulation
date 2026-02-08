@@ -1,27 +1,127 @@
+from pywire import wire
+
 # Default values
-current_balance = 50000.00
 current_age = 35
 planned_retirement_age = 65
-annual_401k_contribution = 10000.00
-annual_roth_contribution = 6000.00
+annual_income = 100000.00
+expected_income_growth = 3.0
+
+# 401k inputs (defaults to 0 if not used)
+balance_401k = 0.00
+contribution_401k_percent = 0.0
 employer_match_percent = 50.0
 employer_match_limit = 6.0
 
+# Roth IRA inputs (defaults to 0 if not used)
+balance_roth = 0.00
+annual_roth_contribution = 0.00
+
 # Calculations
-years_to_retirement = planned_retirement_age - current_age
+years_to_retirement = max(0, planned_retirement_age - current_age)
+
+# Calculate 401k contribution in dollars
+annual_401k_contribution = annual_income * (contribution_401k_percent / 100.0)
+
+# Calculate employer match (with protection)
+if annual_income > 0 and contribution_401k_percent > 0:
+    match_on_contribution = annual_401k_contribution * (employer_match_percent / 100.0)
+    match_limit_dollars = annual_income * (employer_match_limit / 100.0)
+    annual_employer_match = min(match_on_contribution, match_limit_dollars)
+else:
+    annual_employer_match = 0.0
+
+# Total calculations
+current_balance = balance_401k + balance_roth
 total_annual_contribution = annual_401k_contribution + annual_roth_contribution
-annual_employer_match = min(annual_401k_contribution * (employer_match_percent / 100),
-                             annual_401k_contribution * (employer_match_limit / 100))
 total_annual_savings = total_annual_contribution + annual_employer_match
 total_contributions_by_retirement = total_annual_contribution * years_to_retirement
 total_employer_match_by_retirement = annual_employer_match * years_to_retirement
 total_saved_by_retirement = current_balance + total_contributions_by_retirement + total_employer_match_by_retirement
+
+# Income-based calculations
+savings_rate = (total_annual_savings / annual_income * 100) if annual_income > 0 else 0
+personal_savings_rate = (total_annual_contribution / annual_income * 100) if annual_income > 0 else 0
+income_at_retirement = annual_income * ((1 + expected_income_growth / 100) ** years_to_retirement)
 
 # Limits
 limit_401k = 23500.00
 limit_roth = 7000.00
 is_maxing_401k = annual_401k_contribution >= limit_401k
 is_maxing_roth = annual_roth_contribution >= limit_roth
+
+# Initialize wires for conditional rendering
+contribution_401k_status = wire('')
+contribution_roth_status = wire('')
+employer_match_display = wire('')
+
+# Format strings for display (avoiding nested f-strings)
+if annual_401k_contribution > 0:
+    if is_maxing_401k:
+        contribution_401k_status.value = ' ✓ Maxed!'
+    else:
+        pct_of_limit = int((annual_401k_contribution / limit_401k) * 100) if limit_401k > 0 else 0
+        contribution_401k_status.value = f'${annual_401k_contribution:,.0f}/year • {pct_of_limit}% of ${limit_401k:,.0f} limit'
+else:
+    contribution_401k_status.value = ''
+
+if annual_roth_contribution > 0:
+    if is_maxing_roth:
+        contribution_roth_status.value = ' ✓ Maxed!'
+    else:
+        pct_of_limit = int((annual_roth_contribution / limit_roth) * 100) if limit_roth > 0 else 0
+        contribution_roth_status.value = f'{pct_of_limit}% of ${limit_roth:,.0f} limit'
+else:
+    contribution_roth_status.value = ''
+
+if annual_employer_match > 0:
+    employer_match_display.value = f'${annual_employer_match:,.0f}/year'
+else:
+    employer_match_display.value = ''
+
+# Calculate percentages for breakdown chart (protect against division by zero)
+if total_saved_by_retirement > 0:
+    pct_401k = min(100, (annual_401k_contribution * years_to_retirement / total_saved_by_retirement) * 100)
+    pct_roth = min(100, (annual_roth_contribution * years_to_retirement / total_saved_by_retirement) * 100)
+    pct_employer = min(100, (total_employer_match_by_retirement / total_saved_by_retirement) * 100)
+    pct_starting = min(100, (current_balance / total_saved_by_retirement) * 100)
+else:
+    pct_401k = 0
+    pct_roth = 0
+    pct_employer = 0
+    pct_starting = 0
+
+# Calculate yearly projections for chart
+import json
+
+# Ensure we have at least current age in the range
+if years_to_retirement > 0:
+    years = list(range(current_age, planned_retirement_age + 1))
+else:
+    years = [current_age]
+
+yearly_401k = []
+yearly_roth = []
+yearly_total = []
+
+for i, year in enumerate(years):
+    # 401k balance: starting balance + contributions + employer match up to this year
+    curr_401k = balance_401k + (annual_401k_contribution * i) + (annual_employer_match * i)
+    yearly_401k.append(round(curr_401k, 2))
+
+    # Roth IRA balance: starting balance + contributions up to this year
+    curr_roth = balance_roth + (annual_roth_contribution * i)
+    yearly_roth.append(round(curr_roth, 2))
+
+    # Total
+    yearly_total.append(round(curr_401k + curr_roth, 2))
+
+chart_data = {
+    'years': years,
+    'yearly_401k': yearly_401k,
+    'yearly_roth': yearly_roth,
+    'yearly_total': yearly_total
+}
+chart_data_json = json.dumps(chart_data)
 
 --- html ---
 
@@ -38,21 +138,6 @@ is_maxing_roth = annual_roth_contribution >= limit_roth
         <div>
             <div style="background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                 <h2 style="margin: 0 0 1rem 0; color: #333; font-size: 1.1rem;">Your Information</h2>
-
-                <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.4rem; color: #555; font-weight: 500; font-size: 0.9rem;">
-                        Current Balance
-                    </label>
-                    <div style="position: relative; display: flex; align-items: center;">
-                        <span style="position: absolute; left: 10px; color: #666;">$</span>
-                        <input
-                            type="number"
-                            value={current_balance}
-                            style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
-                            placeholder="50000"
-                        />
-                    </div>
-                </div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem;">
                     <div>
@@ -79,82 +164,167 @@ is_maxing_roth = annual_roth_contribution >= limit_roth
                     </div>
                 </div>
 
-                <div style="border-top: 1px solid #f0f0f0; margin: 1rem 0; padding-top: 1rem;">
-                    <h3 style="margin: 0 0 0.75rem 0; color: #333; font-size: 1rem;">Annual Contributions</h3>
+                <details style="border: 2px solid #e0e0e0; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+                    <summary style="cursor: pointer; font-weight: 600; color: #333; font-size: 1rem;">
+                        401(k)
+                    </summary>
 
-                    <div style="margin-bottom: 0.75rem;">
-                        <label style="display: block; margin-bottom: 0.4rem; color: #555; font-weight: 500; font-size: 0.9rem;">
-                            401(k)
-                        </label>
-                        <div style="position: relative; display: flex; align-items: center;">
-                            <span style="position: absolute; left: 10px; color: #666;">$</span>
-                            <input
-                                type="number"
-                                value={annual_401k_contribution}
-                                style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
-                                placeholder="10000"
-                            />
-                        </div>
-                        <div style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">
-                            {' ✓ Maxed!' if is_maxing_401k else f'{int((annual_401k_contribution / limit_401k) * 100)}% of ${limit_401k:,.0f} limit'}
-                        </div>
-                    </div>
+                    <div style="margin-top: 1rem;">
+                        <div style="border-bottom: 1px solid #f0f0f0; margin-bottom: 1rem; padding-bottom: 1rem;">
+                            <h4 style="margin: 0 0 0.75rem 0; color: #555; font-size: 0.95rem; font-weight: 600;">Income</h4>
 
-                    <div style="margin-bottom: 0.75rem;">
-                        <label style="display: block; margin-bottom: 0.4rem; color: #555; font-weight: 500; font-size: 0.9rem;">
-                            Roth IRA
-                        </label>
-                        <div style="position: relative; display: flex; align-items: center;">
-                            <span style="position: absolute; left: 10px; color: #666;">$</span>
-                            <input
-                                type="number"
-                                value={annual_roth_contribution}
-                                style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
-                                placeholder="6000"
-                            />
-                        </div>
-                        <div style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">
-                            {' ✓ Maxed!' if is_maxing_roth else f'{int((annual_roth_contribution / limit_roth) * 100)}% of ${limit_roth:,.0f} limit'}
-                        </div>
-                    </div>
-                </div>
+                            <div style="margin-bottom: 0.75rem;">
+                                <label style="display: block; margin-bottom: 0.4rem; color: #555; font-weight: 500; font-size: 0.9rem;">
+                                    Annual Income
+                                </label>
+                                <div style="position: relative; display: flex; align-items: center;">
+                                    <span style="position: absolute; left: 10px; color: #666;">$</span>
+                                    <input
+                                        type="number"
+                                        value={annual_income}
+                                        style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
+                                        placeholder="100000"
+                                        step="1000"
+                                    />
+                                </div>
+                            </div>
 
-                <div style="border-top: 1px solid #f0f0f0; margin: 1rem 0; padding-top: 1rem;">
-                    <h3 style="margin: 0 0 0.75rem 0; color: #333; font-size: 1rem;">Employer Match</h3>
-
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                        <div>
-                            <label style="display: block; margin-bottom: 0.4rem; color: #555; font-weight: 500; font-size: 0.9rem;">
-                                Match %
-                            </label>
-                            <div style="position: relative; display: flex; align-items: center;">
-                                <input
-                                    type="number"
-                                    value={employer_match_percent}
-                                    style="width: 100%; padding: 0.6rem 1.5rem 0.6rem 0.6rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
-                                    placeholder="50"
-                                    step="1"
-                                />
-                                <span style="position: absolute; right: 10px; color: #666;">%</span>
+                            <div style="margin-bottom: 0.75rem;">
+                                <label style="display: block; margin-bottom: 0.4rem; color: #555; font-weight: 500; font-size: 0.9rem;">
+                                    Expected Income Growth
+                                </label>
+                                <div style="position: relative; display: flex; align-items: center;">
+                                    <input
+                                        type="number"
+                                        value={expected_income_growth}
+                                        style="width: 100%; padding: 0.6rem 1.5rem 0.6rem 0.6rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
+                                        placeholder="3.0"
+                                        step="0.5"
+                                    />
+                                    <span style="position: absolute; right: 10px; color: #666;">% per year</span>
+                                </div>
+                                <div style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">
+                                    Average salary increases over time
+                                </div>
                             </div>
                         </div>
-                        <div>
+
+                        <div style="margin-bottom: 0.75rem;">
                             <label style="display: block; margin-bottom: 0.4rem; color: #555; font-weight: 500; font-size: 0.9rem;">
-                                Up to %
+                                Current Balance
+                            </label>
+                            <div style="position: relative; display: flex; align-items: center;">
+                                <span style="position: absolute; left: 10px; color: #666;">$</span>
+                                <input
+                                    type="number"
+                                    value={balance_401k}
+                                    style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
+                                    placeholder="0"
+                                    step="1000"
+                                />
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 0.75rem;">
+                            <label style="display: block; margin-bottom: 0.4rem; color: #555; font-weight: 500; font-size: 0.9rem;">
+                                Annual Contribution
                             </label>
                             <div style="position: relative; display: flex; align-items: center;">
                                 <input
                                     type="number"
-                                    value={employer_match_limit}
+                                    value={contribution_401k_percent}
                                     style="width: 100%; padding: 0.6rem 1.5rem 0.6rem 0.6rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
-                                    placeholder="6"
+                                    placeholder="0"
                                     step="0.5"
                                 />
-                                <span style="position: absolute; right: 10px; color: #666;">%</span>
+                                <span style="position: absolute; right: 10px; color: #666;">% of income</span>
                             </div>
+                            <div $if={contribution_401k_status} style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">{contribution_401k_status}</div>
+                        </div>
+
+                        <div style="background: #f8f9fa; padding: 0.75rem; border-radius: 6px;">
+                            <h4 style="margin: 0 0 0.5rem 0; color: #555; font-size: 0.9rem; font-weight: 600;">Employer Match</h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                                <div>
+                                    <label style="display: block; margin-bottom: 0.3rem; color: #666; font-weight: 500; font-size: 0.85rem;">
+                                        Match %
+                                    </label>
+                                    <div style="position: relative; display: flex; align-items: center;">
+                                        <input
+                                            type="number"
+                                            value={employer_match_percent}
+                                            style="width: 100%; padding: 0.5rem 1.3rem 0.5rem 0.5rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem; font-family: inherit; background: white;"
+                                            placeholder="50"
+                                            step="1"
+                                        />
+                                        <span style="position: absolute; right: 8px; color: #666; font-size: 0.85rem;">%</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 0.3rem; color: #666; font-weight: 500; font-size: 0.85rem;">
+                                        Up to %
+                                    </label>
+                                    <div style="position: relative; display: flex; align-items: center;">
+                                        <input
+                                            type="number"
+                                            value={employer_match_limit}
+                                            style="width: 100%; padding: 0.5rem 1.3rem 0.5rem 0.5rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem; font-family: inherit; background: white;"
+                                            placeholder="6"
+                                            step="0.5"
+                                        />
+                                        <span style="position: absolute; right: 8px; color: #666; font-size: 0.85rem;">%</span>
+                                    </div>
+                                </div>
+                            </div>
+                            {$if employer_match_display}
+                            <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #28a745; font-weight: 600;">Match: {employer_match_display}</div>
+                            {/if}
                         </div>
                     </div>
-                </div>
+                </details>
+
+                <details style="border: 2px solid #e0e0e0; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+                    <summary style="cursor: pointer; font-weight: 600; color: #333; font-size: 1rem;">
+                        Roth IRA
+                    </summary>
+
+                    <div style="margin-top: 1rem;">
+                        <div style="margin-bottom: 0.75rem;">
+                            <label style="display: block; margin-bottom: 0.4rem; color: #555; font-weight: 500; font-size: 0.9rem;">
+                                Current Balance
+                            </label>
+                            <div style="position: relative; display: flex; align-items: center;">
+                                <span style="position: absolute; left: 10px; color: #666;">$</span>
+                                <input
+                                    type="number"
+                                    value={balance_roth}
+                                    style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
+                                    placeholder="0"
+                                    step="1000"
+                                />
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 0.75rem;">
+                            <label style="display: block; margin-bottom: 0.4rem; color: #555; font-weight: 500; font-size: 0.9rem;">
+                                Annual Contribution
+                            </label>
+                            <div style="position: relative; display: flex; align-items: center;">
+                                <span style="position: absolute; left: 10px; color: #666;">$</span>
+                                <input
+                                    type="number"
+                                    value={annual_roth_contribution}
+                                    style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
+                                    placeholder="0"
+                                    step="500"
+                                />
+                            </div>
+                            {$if contribution_roth_status}
+                            <div style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">{contribution_roth_status}</div>
+                            {/if}
+                        </div>
+                    </div>
+                </details>
 
                 <button style="
                     width: 100%;
@@ -199,6 +369,12 @@ is_maxing_roth = annual_roth_contribution >= limit_roth
                         <div style="font-size: 2rem; font-weight: bold; margin: 0.25rem 0;">${'{:,.0f}'.format(total_saved_by_retirement)}</div>
                         <div style="font-size: 0.8rem; opacity: 0.8;">Without growth</div>
                     </div>
+
+                    <div style="padding: 1rem; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); border-radius: 6px; color: white;">
+                        <div style="font-size: 0.85rem; opacity: 0.9;">Total Savings Rate</div>
+                        <div style="font-size: 2rem; font-weight: bold; margin: 0.25rem 0;">{'{:.1f}'.format(savings_rate)}%</div>
+                        <div style="font-size: 0.8rem; opacity: 0.8;">You: {'{:.1f}'.format(personal_savings_rate)}% + Match: {'{:.1f}'.format((annual_employer_match / annual_income * 100) if annual_income > 0 else 0)}%</div>
+                    </div>
                 </div>
             </div>
 
@@ -211,7 +387,7 @@ is_maxing_roth = annual_roth_contribution >= limit_roth
                         <span style="font-weight: 600; font-size: 0.9rem;">${'{:,.0f}'.format(annual_401k_contribution * years_to_retirement)}</span>
                     </div>
                     <div style="height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden;">
-                        <div style="height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); width: {min(100, (annual_401k_contribution * years_to_retirement / total_saved_by_retirement) * 100)}%;"></div>
+                        <div style="height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); width: {pct_401k}%;"></div>
                     </div>
                 </div>
 
@@ -221,7 +397,7 @@ is_maxing_roth = annual_roth_contribution >= limit_roth
                         <span style="font-weight: 600; font-size: 0.9rem;">${'{:,.0f}'.format(annual_roth_contribution * years_to_retirement)}</span>
                     </div>
                     <div style="height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden;">
-                        <div style="height: 100%; background: linear-gradient(90deg, #f093fb, #f5576c); width: {min(100, (annual_roth_contribution * years_to_retirement / total_saved_by_retirement) * 100)}%;"></div>
+                        <div style="height: 100%; background: linear-gradient(90deg, #f093fb, #f5576c); width: {pct_roth}%;"></div>
                     </div>
                 </div>
 
@@ -231,7 +407,7 @@ is_maxing_roth = annual_roth_contribution >= limit_roth
                         <span style="font-weight: 600; font-size: 0.9rem; color: #28a745;">${'{:,.0f}'.format(total_employer_match_by_retirement)}</span>
                     </div>
                     <div style="height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden;">
-                        <div style="height: 100%; background: linear-gradient(90deg, #43e97b, #38f9d7); width: {min(100, (total_employer_match_by_retirement / total_saved_by_retirement) * 100)}%;"></div>
+                        <div style="height: 100%; background: linear-gradient(90deg, #43e97b, #38f9d7); width: {pct_employer}%;"></div>
                     </div>
                 </div>
 
@@ -241,7 +417,7 @@ is_maxing_roth = annual_roth_contribution >= limit_roth
                         <span style="font-weight: 600; font-size: 0.9rem;">${'{:,.0f}'.format(current_balance)}</span>
                     </div>
                     <div style="height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden;">
-                        <div style="height: 100%; background: linear-gradient(90deg, #4facfe, #00f2fe); width: {min(100, (current_balance / total_saved_by_retirement) * 100)}%;"></div>
+                        <div style="height: 100%; background: linear-gradient(90deg, #4facfe, #00f2fe); width: {pct_starting}%;"></div>
                     </div>
                 </div>
 
@@ -261,4 +437,143 @@ is_maxing_roth = annual_roth_contribution >= limit_roth
             </div>
         </div>
     </div>
+
+    <!-- Growth Chart -->
+    <div id="chart-data" style="display: none;" data-chart='{chart_data_json}'></div>
+
+    <div style="margin-top: 3rem;">
+        <h2 style="margin-bottom: 1rem;">Savings Growth Over Time</h2>
+        <div style="background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <div style="position: relative; height: 500px;">
+                <canvas id="contributionsChart"></canvas>
+            </div>
+        </div>
+    </div>
 </section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+    window.addEventListener('load', function() {
+        // Parse data from Python
+        const chartDataEl = document.getElementById('chart-data');
+        const chartData = JSON.parse(chartDataEl.dataset.chart);
+
+        const ctx = document.getElementById('contributionsChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.years,
+                datasets: [
+                    {
+                        label: '401(k) Balance',
+                        data: chartData.yearly_401k,
+                        borderColor: 'rgb(102, 126, 234)',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        borderWidth: 3,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 3,
+                        pointHoverRadius: 6
+                    },
+                    {
+                        label: 'Roth IRA Balance',
+                        data: chartData.yearly_roth,
+                        borderColor: 'rgb(240, 147, 251)',
+                        backgroundColor: 'rgba(240, 147, 251, 0.1)',
+                        borderWidth: 3,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 3,
+                        pointHoverRadius: 6
+                    },
+                    {
+                        label: 'Total Balance',
+                        data: chartData.yearly_total,
+                        borderColor: 'rgb(79, 172, 254)',
+                        backgroundColor: 'rgba(79, 172, 254, 0.1)',
+                        borderWidth: 4,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 7,
+                        borderDash: [5, 5]
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            boxWidth: 20,
+                            font: {
+                                size: 12
+                            },
+                            padding: 15
+                        }
+                    },
+                    title: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': $';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += context.parsed.y.toLocaleString('en-US', {
+                                        minimumFractionDigits: 0,
+                                        maximumFractionDigits: 0
+                                    });
+                                }
+                                return label;
+                            },
+                            title: function(context) {
+                                return 'Age ' + context[0].label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        title: {
+                            display: true,
+                            text: 'Balance ($)'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toLocaleString('en-US', {
+                                    minimumFractionDigits: 0,
+                                    maximumFractionDigits: 0
+                                });
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        beginAtZero: true
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Age'
+                        },
+                        grid: {
+                            display: false
+                        }
+                    }
+                }
+            }
+        });
+    });
+</script>
