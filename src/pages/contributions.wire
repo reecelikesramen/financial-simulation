@@ -4,7 +4,8 @@ import json
 # Reactive input values - these are the only wires we need
 current_age = wire(35)
 planned_retirement_age = wire(65)
-annual_income = wire(100000.00)
+annual_income = wire(83592)  # Numeric value for calculations
+annual_income_display = wire("83,592")  # Formatted string for display
 expected_income_growth = wire(3.0)
 
 # 401k reactive inputs
@@ -17,6 +18,10 @@ employer_match_limit = wire(6.0)
 balance_roth = wire(0.00)
 annual_roth_contribution = wire(0.00)
 
+# UI state - track which sections are open
+details_401k_open = wire(True)
+details_roth_open = wire(True)
+
 # Limits (constants)
 limit_401k = 23500.00
 limit_roth = 7000.00
@@ -26,7 +31,7 @@ def calc_years_to_retirement():
     return max(0, $planned_retirement_age - $current_age)
 
 def calc_annual_401k_contribution():
-    return $annual_income * ($contribution_401k_percent / 100.0)
+    return min($annual_income * ($contribution_401k_percent / 100.0), limit_401k)
 
 def calc_annual_employer_match():
     if $annual_income > 0 and $contribution_401k_percent > 0:
@@ -56,6 +61,23 @@ def calc_total_employer_match_by_retirement():
 def calc_total_contributions_by_retirement():
     return calc_total_annual_contribution() * calc_years_to_retirement()
 
+def get_401k_contribution_status():
+    """Get status text for 401k contribution (maxed or percentage of limit)."""
+    contribution = $annual_income * ($contribution_401k_percent / 100.0)
+    if contribution >= limit_401k:
+        return ' ✓ Maxed!'
+    else:
+        percent_of_limit = int(contribution / limit_401k * 100)
+        return f'${contribution:,.0f}/year • {percent_of_limit}% of ${limit_401k:,.0f} limit'
+
+def get_roth_contribution_status():
+    """Get status text for Roth IRA contribution (maxed or percentage of limit)."""
+    if $annual_roth_contribution >= limit_roth:
+        return ' ✓ Maxed!'
+    else:
+        percent_of_limit = int($annual_roth_contribution / limit_roth * 100)
+        return f'{percent_of_limit}% of ${limit_roth:,.0f} limit'
+
 def calc_chart_data():
     """Generate chart data as JSON string for the Chart.js visualization."""
     years_range = list(range($current_age, $planned_retirement_age + 1)) if calc_years_to_retirement() > 0 else [$current_age]
@@ -82,6 +104,25 @@ def calc_chart_data():
     }
     return json.dumps(data)
 
+# Helper function to format number with commas
+def format_number_with_commas(value):
+    """Format a number with commas as thousands separator."""
+    if value == 0:
+        return "0"
+    return f"{value:,.0f}"
+
+# Helper function to parse formatted input
+def parse_formatted_number(value_str):
+    """Remove commas and parse to float."""
+    if not value_str:
+        return 0.0
+    # Remove commas and parse
+    cleaned = value_str.replace(",", "")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
+
 # Input change handlers - simple value setters
 def update_current_age(event):
     $current_age = int(event.value) if event.value else 35
@@ -90,13 +131,17 @@ def update_retirement_age(event):
     $planned_retirement_age = int(event.value) if event.value else 65
 
 def update_annual_income(event):
-    $annual_income = float(event.value) if event.value else 0.0
+    # Parse the numeric value for calculations
+    numeric_value = parse_formatted_number(event.value)
+    $annual_income = numeric_value
+    # Update the display value with formatting
+    $annual_income_display = format_number_with_commas(numeric_value)
 
 def update_income_growth(event):
     $expected_income_growth = float(event.value) if event.value else 0.0
 
 def update_balance_401k(event):
-    $balance_401k = float(event.value) if event.value else 0.0
+    $balance_401k = parse_formatted_number(event.value)
 
 def update_contribution_401k(event):
     $contribution_401k_percent = float(event.value) if event.value else 0.0
@@ -108,10 +153,18 @@ def update_employer_match_limit(event):
     $employer_match_limit = float(event.value) if event.value else 0.0
 
 def update_balance_roth(event):
-    $balance_roth = float(event.value) if event.value else 0.0
+    $balance_roth = parse_formatted_number(event.value)
 
 def update_roth_contribution(event):
-    $annual_roth_contribution = float(event.value) if event.value else 0.0
+    parsed = parse_formatted_number(event.value)
+    $annual_roth_contribution = min(parsed, limit_roth)
+
+# UI toggle handlers
+def toggle_401k_section():
+    $details_401k_open = not $details_401k_open
+
+def toggle_roth_section():
+    $details_roth_open = not $details_roth_open
 
 --- html ---
 
@@ -156,8 +209,8 @@ def update_roth_contribution(event):
                     </div>
                 </div>
 
-                <details style="border: 2px solid #e0e0e0; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
-                    <summary style="cursor: pointer; font-weight: 600; color: #333; font-size: 1rem;">
+                <details open={details_401k_open.value} style="border: 2px solid #e0e0e0; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+                    <summary @click={toggle_401k_section} style="cursor: pointer; font-weight: 600; color: #333; font-size: 1rem;">
                         401(k) or 403(b)
                     </summary>
 
@@ -172,12 +225,12 @@ def update_roth_contribution(event):
                                 <div style="position: relative; display: flex; align-items: center;">
                                     <span style="position: absolute; left: 10px; color: #666;">$</span>
                                     <input
-                                        type="number"
-                                        value={annual_income.value}
+                                        type="text"
+                                        class="dollar-input"
+                                        value={annual_income_display.value}
                                         @input={update_annual_income}
                                         style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
-                                        placeholder="100000"
-                                        step="1000"
+                                        placeholder="83,592"
                                     />
                                 </div>
                             </div>
@@ -210,12 +263,12 @@ def update_roth_contribution(event):
                             <div style="position: relative; display: flex; align-items: center;">
                                 <span style="position: absolute; left: 10px; color: #666;">$</span>
                                 <input
-                                    type="number"
-                                    value={balance_401k.value}
+                                    type="text"
+                                    class="dollar-input"
+                                    value={format_number_with_commas(balance_401k.value)}
                                     @input={update_balance_401k}
                                     style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
                                     placeholder="0"
-                                    step="1000"
                                 />
                             </div>
                         </div>
@@ -235,10 +288,7 @@ def update_roth_contribution(event):
                                 />
                                 <span style="position: absolute; right: 10px; color: #666;">% of income</span>
                             </div>
-                            <div $if={annual_income.value * (contribution_401k_percent.value / 100.0) > 0} style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">{
-                                ' ✓ Maxed!' if (annual_income.value * (contribution_401k_percent.value / 100.0)) >= limit_401k
-                                else f'${(annual_income.value * (contribution_401k_percent.value / 100.0)):,.0f}/year • {int((annual_income.value * (contribution_401k_percent.value / 100.0)) / limit_401k * 100)}% of ${limit_401k:,.0f} limit'
-                            }</div>
+                            <div $if={annual_income.value * (contribution_401k_percent.value / 100.0) > 0} style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">{get_401k_contribution_status()}</div>
                         </div>
 
                         <div style="background: #f8f9fa; padding: 0.75rem; border-radius: 6px;">
@@ -289,8 +339,8 @@ def update_roth_contribution(event):
                     </div>
                 </details>
 
-                <details style="border: 2px solid #e0e0e0; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
-                    <summary style="cursor: pointer; font-weight: 600; color: #333; font-size: 1rem;">
+                <details open={details_roth_open.value} style="border: 2px solid #e0e0e0; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+                    <summary @click={toggle_roth_section} style="cursor: pointer; font-weight: 600; color: #333; font-size: 1rem;">
                         Roth IRA
                     </summary>
 
@@ -302,12 +352,12 @@ def update_roth_contribution(event):
                             <div style="position: relative; display: flex; align-items: center;">
                                 <span style="position: absolute; left: 10px; color: #666;">$</span>
                                 <input
-                                    type="number"
-                                    value={balance_roth.value}
+                                    type="text"
+                                    class="dollar-input"
+                                    value={format_number_with_commas(balance_roth.value)}
                                     @input={update_balance_roth}
                                     style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
                                     placeholder="0"
-                                    step="1000"
                                 />
                             </div>
                         </div>
@@ -319,19 +369,16 @@ def update_roth_contribution(event):
                             <div style="position: relative; display: flex; align-items: center;">
                                 <span style="position: absolute; left: 10px; color: #666;">$</span>
                                 <input
-                                    type="number"
-                                    value={annual_roth_contribution.value}
+                                    type="text"
+                                    class="dollar-input"
+                                    value={format_number_with_commas(annual_roth_contribution.value)}
                                     @input={update_roth_contribution}
                                     style="width: 100%; padding: 0.6rem 0.6rem 0.6rem 1.5rem; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 0.95rem; font-family: inherit;"
                                     placeholder="0"
-                                    step="500"
                                 />
                             </div>
                             {$if annual_roth_contribution.value > 0}
-                            <div style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">{
-                                ' ✓ Maxed!' if annual_roth_contribution.value >= limit_roth
-                                else f'{int(annual_roth_contribution.value / limit_roth * 100)}% of ${limit_roth:,.0f} limit'
-                            }</div>
+                            <div style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">{get_roth_contribution_status()}</div>
                             {/if}
                         </div>
                     </div>
@@ -568,6 +615,42 @@ def update_roth_contribution(event):
                     }
                 }
             }
+        });
+    });
+
+    // Real-time comma formatting for dollar inputs
+    document.addEventListener('DOMContentLoaded', function() {
+        const dollarInputs = document.querySelectorAll('.dollar-input');
+
+        dollarInputs.forEach(input => {
+            input.addEventListener('input', function(e) {
+                // Get current cursor position
+                const cursorPosition = this.selectionStart;
+                const oldValue = this.value;
+
+                // Remove all non-digit characters
+                const numericValue = oldValue.replace(/[^\d]/g, '');
+
+                // Format with commas
+                let formattedValue = '';
+                if (numericValue) {
+                    formattedValue = parseInt(numericValue, 10).toLocaleString('en-US');
+                }
+
+                // Update the display value
+                this.value = formattedValue;
+
+                // Calculate new cursor position
+                // Count commas before old cursor position
+                const commasBeforeOld = (oldValue.slice(0, cursorPosition).match(/,/g) || []).length;
+                // Count commas before new cursor position
+                const commasBeforeNew = (formattedValue.slice(0, cursorPosition).match(/,/g) || []).length;
+                // Adjust cursor position based on comma difference
+                const newCursorPosition = cursorPosition + (commasBeforeNew - commasBeforeOld);
+
+                // Restore cursor position
+                this.setSelectionRange(newCursorPosition, newCursorPosition);
+            });
         });
     });
 </script>
