@@ -1,3 +1,4 @@
+---
 from datetime import datetime
 
 # Sample withdrawal plan data
@@ -28,8 +29,7 @@ projected_balance = current_balance * ((1 + expected_annual_return) ** years_to_
 # Safe withdrawal rate (4% rule)
 safe_annual_withdrawal = projected_balance * 0.04
 
---- html ---
-
+---
 <section>
     <div style="margin-bottom: 2rem;">
         <a href="/" style="color: #667eea; text-decoration: none;">&larr; Back to Dashboard</a>

@@ -1,6 +1,7 @@
+---
 import json
-from src.financial_data import get_inflation_data
-from src.worldbank_data import get_country_stock_returns, get_available_countries, DEFAULT_COUNTRIES
+from financial_data import get_inflation_data
+from worldbank_data import get_country_stock_returns, get_available_countries, DEFAULT_COUNTRIES
 
 # Fetch inflation data
 inflation_data = get_inflation_data(years=20)
@@ -29,8 +30,7 @@ filtered_countries_data = countries_data
 inflation_json = json.dumps(inflation_data)
 countries_json = json.dumps(filtered_countries_data)
 
---- html ---
-
+---
 <div id="chart-data" style="display: none;"
      data-inflation='{inflation_json}'
      data-countries='{countries_json}'>

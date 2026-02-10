@@ -1,3 +1,4 @@
+---
 from datetime import datetime
 
 # Sample medical receipt data
@@ -124,8 +125,7 @@ for receipt in receipts:
     cat = receipt["category"]
     category_totals[cat] = category_totals.get(cat, 0) + receipt["amount"]
 
---- html ---
-
+---
 <section>
     <div style="margin-bottom: 2rem;">
         <a href="/" style="color: #667eea; text-decoration: none;">&larr; Back to Dashboard</a>
