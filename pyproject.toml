@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A new pywire application"
 requires-python = ">=3.12"
 dependencies = [
-    "pywire>=0.1.8",
+    "pywire>=0.1.9",
     "stripe>=7.0.0",
     "sqlalchemy>=2.0.0",
     "yfinance>=0.2.0",
