@@ -576,8 +576,8 @@ def isReceiptsEmpty():
 </div>
 
 <!-- Modal Dialog -->
-<div $if={show_modal} style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000;" @click.self={close_modal}>
-    <div style="background: var(--pico-card-background-color, white); border-radius: 12px; padding: 2rem; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.5); border: 1px solid var(--pico-muted-border-color, #e5e7eb);">
+<div $if={show_modal} style="position: fixed; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.5); z-index: 1000;" @click.self={close_modal}>
+    <div style="background: var(--pico-card-background-color, white); padding: 2rem; max-width: 600px; margin: 0 auto; max-height: 90vh; overflow-y: auto; box-shadow: 0 -4px 20px rgba(0,0,0,0.3);">
         <h2 style="margin-top: 0; color: var(--pico-color, inherit);">{edit_mode and 'Edit Receipt' or 'Add New Receipt'}</h2>
 
         <!-- Error Message Display -->
@@ -975,3 +975,4 @@ function exportPDF() {
     printWindow.print();
 }
 </script>
+
