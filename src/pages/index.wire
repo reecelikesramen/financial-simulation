@@ -7,15 +7,15 @@
             text-decoration: none;
             color: inherit;
             padding: 2rem;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4e62c8 0%, #8030b8 100%);
             border-radius: 12px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             transition: all 0.3s;
         " onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 12px rgba(0,0,0,0.15)'"
            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(0,0,0,0.1)'">
-            <div style="color: white;">
+            <div style="color: white; text-shadow: 0 1px 3px rgba(0,0,0,0.3);">
                 <h2 style="margin: 0 0 0.5rem 0; font-size: 1.5rem;">📈 Global Market</h2>
-                <p style="margin: 0; opacity: 0.9; font-size: 0.95rem;">View historical stock market performance across 84 countries with inflation data.</p>
+                <p style="margin: 0; font-size: 0.95rem;">View historical stock market performance across 84 countries with inflation data.</p>
             </div>
         </a>
 
@@ -23,15 +23,15 @@
             text-decoration: none;
             color: inherit;
             padding: 2rem;
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            background: linear-gradient(135deg, #c038a8 0%, #b82040 100%);
             border-radius: 12px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             transition: all 0.3s;
         " onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 12px rgba(0,0,0,0.15)'"
            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(0,0,0,0.1)'">
-            <div style="color: white;">
+            <div style="color: white; text-shadow: 0 1px 3px rgba(0,0,0,0.3);">
                 <h2 style="margin: 0 0 0.5rem 0; font-size: 1.5rem;">💰 Contributions</h2>
-                <p style="margin: 0; opacity: 0.9; font-size: 0.95rem;">Track and manage your retirement account contributions and savings.</p>
+                <p style="margin: 0; font-size: 0.95rem;">Track and manage your retirement account contributions and savings.</p>
             </div>
         </a>
 
@@ -39,15 +39,15 @@
             text-decoration: none;
             color: inherit;
             padding: 2rem;
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            background: linear-gradient(135deg, #2868cc 0%, #0898a8 100%);
             border-radius: 12px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             transition: all 0.3s;
         " onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 12px rgba(0,0,0,0.15)'"
            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(0,0,0,0.1)'">
-            <div style="color: white;">
+            <div style="color: white; text-shadow: 0 1px 3px rgba(0,0,0,0.3);">
                 <h2 style="margin: 0 0 0.5rem 0; font-size: 1.5rem;">🏦 Withdrawals (COMING SOON)</h2>
-                <p style="margin: 0; opacity: 0.9; font-size: 0.95rem;">Plan and track your retirement withdrawals and distribution strategy.</p>
+                <p style="margin: 0; font-size: 0.95rem;">Plan and track your retirement withdrawals and distribution strategy.</p>
             </div>
         </a>
 
@@ -55,15 +55,15 @@
             text-decoration: none;
             color: inherit;
             padding: 2rem;
-            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            background: linear-gradient(135deg, #28a860 0%, #108898 100%);
             border-radius: 12px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             transition: all 0.3s;
         " onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 12px rgba(0,0,0,0.15)'"
            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(0,0,0,0.1)'">
-            <div style="color: white;">
+            <div style="color: white; text-shadow: 0 1px 3px rgba(0,0,0,0.3);">
                 <h2 style="margin: 0 0 0.5rem 0; font-size: 1.5rem;">🏥 Medical Receipts (COMING SOON)</h2>
-                <p style="margin: 0; opacity: 0.9; font-size: 0.95rem;">Store and organize your medical expenses and HSA-eligible receipts.</p>
+                <p style="margin: 0; font-size: 0.95rem;">Store and organize your medical expenses and HSA-eligible receipts.</p>
             </div>
         </a>
     </div>

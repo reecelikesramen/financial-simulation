@@ -1,213 +1,568 @@
 ---
-from datetime import datetime
+from pywire import wire, derived
+from datetime import datetime, date
+import json
+import uuid
 
-# Sample medical receipt data
-receipts = [
-    {
-        "date": "2024-01-15",
-        "provider": "City General Hospital",
-        "category": "Medical",
-        "description": "Annual physical exam",
-        "amount": 250.00,
-        "hsa_eligible": True,
-        "reimbursed": True
-    },
-    {
-        "date": "2024-02-03",
-        "provider": "Vision Center",
-        "category": "Vision",
-        "description": "Eye exam and prescription glasses",
-        "amount": 385.00,
-        "hsa_eligible": True,
-        "reimbursed": False
-    },
-    {
-        "date": "2024-03-20",
-        "provider": "Downtown Dental",
-        "category": "Dental",
-        "description": "Teeth cleaning and checkup",
-        "amount": 175.00,
-        "hsa_eligible": True,
-        "reimbursed": True
-    },
-    {
-        "date": "2024-04-12",
-        "provider": "ABC Pharmacy",
-        "category": "Prescription",
-        "description": "Prescription medications (3 months)",
-        "amount": 125.50,
-        "hsa_eligible": True,
-        "reimbursed": False
-    },
-    {
-        "date": "2024-05-08",
-        "provider": "Physical Therapy Clinic",
-        "category": "Medical",
-        "description": "Physical therapy sessions (6 visits)",
-        "amount": 540.00,
-        "hsa_eligible": True,
-        "reimbursed": False
-    },
-    {
-        "date": "2024-06-15",
-        "provider": "City General Hospital",
-        "category": "Medical",
-        "description": "Lab work and blood tests",
-        "amount": 320.00,
-        "hsa_eligible": True,
-        "reimbursed": True
-    },
-    {
-        "date": "2024-07-22",
-        "provider": "ABC Pharmacy",
-        "category": "Prescription",
-        "description": "Prescription medications (3 months)",
-        "amount": 125.50,
-        "hsa_eligible": True,
-        "reimbursed": False
-    },
-    {
-        "date": "2024-08-10",
-        "provider": "Orthopedic Specialists",
-        "category": "Medical",
-        "description": "Consultation and X-rays",
-        "amount": 425.00,
-        "hsa_eligible": True,
-        "reimbursed": False
-    },
-    {
-        "date": "2024-09-05",
-        "provider": "Downtown Dental",
-        "category": "Dental",
-        "description": "Dental filling",
-        "amount": 285.00,
-        "hsa_eligible": True,
-        "reimbursed": False
-    },
-    {
-        "date": "2024-10-18",
-        "provider": "ABC Pharmacy",
-        "category": "Prescription",
-        "description": "Prescription medications (3 months)",
-        "amount": 125.50,
-        "hsa_eligible": True,
-        "reimbursed": False
-    },
-    {
-        "date": "2024-11-02",
-        "provider": "Vision Center",
-        "category": "Vision",
-        "description": "Contact lenses (annual supply)",
-        "amount": 280.00,
-        "hsa_eligible": True,
-        "reimbursed": False
-    },
-    {
-        "date": "2024-12-10",
-        "provider": "City General Hospital",
-        "category": "Medical",
-        "description": "Flu shot and preventive care",
-        "amount": 85.00,
-        "hsa_eligible": True,
-        "reimbursed": True
-    },
-]
+# ===== REACTIVE STATE =====
 
-# Calculate totals
-total_expenses = sum(r["amount"] for r in receipts)
-total_reimbursed = sum(r["amount"] for r in receipts if r["reimbursed"])
-total_pending = sum(r["amount"] for r in receipts if not r["reimbursed"])
-hsa_eligible = sum(r["amount"] for r in receipts if r["hsa_eligible"])
+# Receipt list - main data store
+receipts = wire({})
 
-# Category breakdown
-category_totals = {}
-for receipt in receipts:
-    cat = receipt["category"]
-    category_totals[cat] = category_totals.get(cat, 0) + receipt["amount"]
+# Form state - individual scalars for each field
+form_date = wire(datetime.now().strftime("%Y-%m-%d"))
+form_provider = wire("")
+form_category = wire("Medical")
+form_description = wire("")
+form_amount = wire(0.0)
+form_hsa_eligible = wire(True)
+form_reimbursed = wire(False)
+form_image_base64 = wire("")
+form_image_thumbnail = wire("")
+form_image_filename = wire("")
 
+# UI state
+show_modal = wire(False)
+edit_mode = wire(False)
+edit_id = wire("")
+
+# Filter/sort state
+filter_category = wire("All")
+filter_status = wire("All")
+sort_column = wire("date")
+sort_direction = wire("desc")
+
+# Settings
+user_tax_bracket = wire(22.0)
+hsa_annual_return = wire(7.0)
+storage_warning = wire(False)
+form_error = wire("")
+storage_json = wire("{}")
+
+# ===== EVENT HANDLER FACTORIES =====
+
+def make_text_handler(wire_var):
+    def handler(event):
+        wire_var.value = event.value
+        form_error.value = ""  # Clear error when user types
+    return handler
+
+def make_float_handler(wire_var):
+    def handler(event):
+        try:
+            wire_var.value = float(str(event.value).replace(',', '')) if event.value else 0.0
+        except (ValueError, TypeError):
+            wire_var.value = 0.0
+        form_error.value = ""  # Clear error when user types
+    return handler
+
+def make_bool_handler(wire_var):
+    def handler(event):
+        wire_var.value = event.value == "true" or event.value == True
+        form_error.value = ""  # Clear error when user types
+    return handler
+
+# Create handlers
+update_form_date = make_text_handler(form_date)
+update_form_provider = make_text_handler(form_provider)
+update_form_category = make_text_handler(form_category)
+update_form_description = make_text_handler(form_description)
+update_form_amount = make_float_handler(form_amount)
+update_form_hsa_eligible = make_bool_handler(form_hsa_eligible)
+update_form_reimbursed = make_bool_handler(form_reimbursed)
+update_tax_bracket = make_float_handler(user_tax_bracket)
+update_filter_category = make_text_handler(filter_category)
+update_filter_status = make_text_handler(filter_status)
+
+# ===== MODAL OPERATIONS =====
+
+def open_add_modal():
+    """Open modal in add mode — preserves any unsaved form values from a prior cancel"""
+    edit_mode.value = False
+    form_error.value = ""
+    show_modal.value = True
+
+def close_modal():
+    """Close modal"""
+    show_modal.value = False
+    edit_mode.value = False
+
+def reset_form():
+    """Reset form fields to defaults — called only after a successful submit"""
+    form_date.value = datetime.now().strftime("%Y-%m-%d")
+    form_provider.value = ""
+    form_category.value = "Medical"
+    form_description.value = ""
+    form_amount.value = 0.0
+    form_hsa_eligible.value = True
+    form_reimbursed.value = False
+    form_image_base64.value = ""
+    form_image_thumbnail.value = ""
+    form_image_filename.value = ""
+    form_error.value = ""
+
+# ===== CRUD OPERATIONS =====
+
+def save_receipt():
+    """Save new receipt to list"""
+    # Validate required fields
+    if not form_date.value or not form_provider.value:
+        form_error.value = "Please fill in all required fields (Date and Provider)"
+        return
+
+    # Clear any previous errors
+    form_error.value = ""
+
+    # Create new receipt
+    id = str(uuid.uuid4())
+    new_receipt = {
+        "id": id,
+        "date": form_date.value,
+        "provider": form_provider.value,
+        "category": form_category.value,
+        "description": form_description.value,
+        "amount": form_amount.value,
+        "hsa_eligible": form_hsa_eligible.value,
+        "reimbursed": form_reimbursed.value,
+        "image": form_image_base64.value,
+        "thumbnail": form_image_thumbnail.value,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+        "reimbursed_at": datetime.now().isoformat() if form_reimbursed.value else None
+    }
+
+    # Add to dictionary
+    receipts.value.update({id: new_receipt})
+
+    # Update localStorage
+    update_storage()
+
+    # Reset form and close modal
+    reset_form()
+    close_modal()
+
+def edit_receipt(receipt):
+    """Open edit modal for the receipt at the given list index"""
+    form_error.value = ""
+    form_date.value = receipt.get("date", "")
+    form_provider.value = receipt.get("provider", "")
+    form_category.value = receipt.get("category", "Medical")
+    form_description.value = receipt.get("description", "")
+    form_amount.value = receipt.get("amount", 0.0)
+    form_hsa_eligible.value = receipt.get("hsa_eligible", True)
+    form_reimbursed.value = receipt.get("reimbursed", False)
+    form_image_base64.value = receipt.get("image", "")
+    form_image_thumbnail.value = receipt.get("thumbnail", "")
+    edit_id.value = receipt.get("id", "")
+    edit_mode.value = True
+    show_modal.value = True
+
+def update_receipt():
+    """Update existing receipt"""
+    # Validate
+    if not form_date.value or not form_provider.value:
+        form_error.value = "Please fill in all required fields (Date and Provider)"
+        return
+
+    # Clear any previous errors
+    form_error.value = ""
+
+    receipt = receipts.value.get(edit_id.value)
+    if not receipt:
+        form_error.value = "Receipt not found."
+        return
+
+    # Replace in dictionary
+    receipts.value[edit_id.value] = {
+        "id": edit_id.value,
+        "date": form_date.value,
+        "provider": form_provider.value,
+        "category": form_category.value,
+        "description": form_description.value,
+        "amount": form_amount.value,
+        "hsa_eligible": form_hsa_eligible.value,
+        "reimbursed": form_reimbursed.value,
+        "image": form_image_base64.value,
+        "thumbnail": form_image_thumbnail.value,
+        "created_at": receipt.get("created_at", datetime.now().isoformat()),
+        "updated_at": datetime.now().isoformat()
+    }
+
+    # Update localStorage
+    update_storage()
+
+    # Reset form and close modal
+    reset_form()
+    close_modal()
+
+def handle_form_submit():
+    """Handle form submission - routes to save or update based on edit_mode"""
+    if edit_mode.value:
+        update_receipt()
+    else:
+        save_receipt()
+
+def delete_receipt(receipt_id):
+    """Delete receipt from list"""
+    receipts.value.pop(receipt_id)
+    update_storage()
+
+def toggle_reimbursed(receipt):
+    """Toggle reimbursement status"""
+    id = receipt.get("id", "")
+    if not receipts.value.get(id) or not receipt.get("hsa_eligible", True):
+        return
+    now = datetime.now().isoformat()
+    reimbursed = receipt.get("reimbursed", False)
+    updated_receipt = receipt.copy()
+    if not updated_receipt or len(updated_receipt) == 0:
+        return
+    updated_receipt["reimbursed"] = not reimbursed
+    updated_receipt["reimbursed_at"] = now if not reimbursed else None
+    updated_receipt["updated_at"] = now
+    receipts.value.update({id: updated_receipt})
+    # Update localStorage
+    update_storage()
+
+# ===== IMAGE HANDLING =====
+
+def handle_file_upload(event):
+    """Receive base64 image data from JavaScript"""
+    try:
+        data = json.loads(event.value)
+        form_image_base64.value = data.get("base64", "")
+        form_image_thumbnail.value = data.get("thumbnail", "")
+        form_image_filename.value = data.get("filename", "")
+    except:
+        pass
+
+def clear_image():
+    """Remove uploaded image"""
+    form_image_base64.value = ""
+    form_image_thumbnail.value = ""
+    form_image_filename.value = ""
+
+def trigger_file_upload():
+    """JavaScript will handle this"""
+    pass
+
+# ===== SORTING =====
+
+def sort_by(column):
+    """Update sort column and direction"""
+    if sort_column.value == column:
+        # Toggle direction
+        sort_direction.value = "asc" if sort_direction.value == "desc" else "desc"
+    else:
+        sort_column.value = column
+        sort_direction.value = "desc"
+
+# ===== LOCALSTORAGE HANDLERS =====
+
+def load_receipts_from_storage(event):
+    """Load receipts from localStorage on page mount"""
+    try:
+        # Try to get the value from the event
+        json_data = None
+        if hasattr(event, 'value') and event.value:
+            json_data = event.value
+        elif hasattr(event, 'target') and hasattr(event.target, 'value') and event.target.value:
+            json_data = event.target.value
+        else:
+            raise ValueError("No data in event")
+
+        data = json.loads(json_data)
+        receipts_list = data.get("receipts", {})
+
+        # Clear and update the list (WireList doesn't allow direct .value assignment)
+        receipts.value.update(receipts_list)
+    except:
+        # Initialize with sample data if localStorage is empty
+        receipts.value.update(
+            {
+                str(uuid.uuid4()): {
+                    "date": "2024-01-15",
+                    "provider": "City General Hospital",
+                    "category": "Medical",
+                    "description": "Annual physical exam",
+                    "amount": 250.00,
+                    "hsa_eligible": True,
+                    "reimbursed": True,
+                    "image": "",
+                    "thumbnail": "",
+                    "created_at": "2024-01-15T10:00:00",
+                    "updated_at": "2024-01-15T10:00:00"
+                },
+                str(uuid.uuid4()): {
+                    "date": "2024-02-03",
+                    "provider": "Vision Center",
+                    "category": "Vision",
+                    "description": "Eye exam and prescription glasses",
+                    "amount": 385.00,
+                    "hsa_eligible": True,
+                    "reimbursed": False,
+                    "image": "",
+                    "thumbnail": "",
+                    "created_at": "2024-02-03T14:30:00",
+                    "updated_at": "2024-02-03T14:30:00"
+                },
+                str(uuid.uuid4()): {
+                    "date": "2024-03-20",
+                    "provider": "Downtown Dental",
+                    "category": "Dental",
+                    "description": "Teeth cleaning and checkup",
+                    "amount": 175.00,
+                    "hsa_eligible": True,
+                    "reimbursed": True,
+                    "image": "",
+                    "thumbnail": "",
+                    "created_at": "2024-03-20T09:00:00",
+                    "updated_at": "2024-03-20T09:00:00"
+                }
+            })
+
+# ===== DERIVED COMPUTATIONS =====
+
+def filtered_sorted_receipts():
+    """Apply filters and sorting to receipts"""
+    result = receipts.value.values()
+
+    # Filter by category
+    if filter_category.value != "All":
+        result = [r for r in result if r.get("category") == filter_category.value]
+
+    # Filter by status
+    if filter_status.value == "Reimbursed":
+        result = [r for r in result if r.get("reimbursed", False)]
+    elif filter_status.value == "Pending":
+        result = [r for r in result if not r.get("reimbursed", False)]
+
+    # Sort
+    col = sort_column.value
+    reverse = sort_direction.value == "desc"
+
+    try:
+        if col == "amount":
+            result.sort(key=lambda r: r.get("amount", 0), reverse=reverse)
+        elif col == "date":
+            result.sort(key=lambda r: r.get("date", ""), reverse=reverse)
+        elif col == "reimbursed":
+            result.sort(key=lambda r: r.get("reimbursed", False), reverse=reverse)
+        else:
+            result.sort(key=lambda r: str(r.get(col, "")), reverse=reverse)
+    except:
+        pass
+
+    return result
+
+def update_storage():
+    """Update the storage JSON wire - triggers localStorage save"""
+    storage_data = {
+        "version": "2.0",
+        "receipts": receipts.value
+    }
+    storage_json.value = json.dumps(storage_data)
+
+# Calculation helpers
+
+def calc_total_expenses():
+    return sum(r.get("amount", 0) for _, r in receipts.value.items())
+
+def calc_total_reimbursed():
+    return sum(r.get("amount", 0) for _, r in receipts.value.items() if r.get("reimbursed", False))
+
+def calc_total_pending():
+    return sum(r.get("amount", 0) for _, r in receipts.value.items() if not r.get("reimbursed", False))
+
+def calc_hsa_eligible():
+    return sum(r.get("amount", 0) for _, r in receipts.value.items() if r.get("hsa_eligible", True))
+
+def calc_earnings_while_pending():
+    """Compound earnings on HSA-eligible receipts.
+    Unreimbursed: from receipt date to today.
+    Reimbursed: from receipt date to reimbursement date (reimbursed_at).
+    Daily rate uses geometric mean: (1 + annual_rate)^(1/365.25) - 1.
+    """
+    today = datetime.now().date()
+    daily_rate = (1 + hsa_annual_return.value / 100.0) ** (1 / 365.25) - 1
+    total = 0.0
+    for _, r in receipts.value.items():
+        if not r.get("hsa_eligible", True):
+            continue
+        amount = r.get("amount", 0)
+        try:
+            receipt_date = datetime.strptime(r.get("date", ""), "%Y-%m-%d").date()
+            if r.get("reimbursed", False):
+                end_date = datetime.fromisoformat(r.get("reimbursed_at", "")).date()
+            else:
+                end_date = today
+            days = max(0, (end_date - receipt_date).days)
+            total += amount * (((1 + daily_rate) ** days) - 1)
+        except:
+            pass
+    return total
+
+def calc_tax_savings():
+    eligible = calc_hsa_eligible()
+    return eligible * (user_tax_bracket.value / 100.0)
+
+def get_category_totals():
+    totals = {}
+    for receipt in receipts.value:
+        cat = receipt.get("category", "Other")
+        totals[cat] = totals.get(cat, 0) + receipt.get("amount", 0)
+    return totals
+
+def get_reimbursed_percent():
+    total = calc_total_expenses()
+    if total == 0:
+        return 0
+    return int((calc_total_reimbursed() / total) * 100)
+
+def isReceiptsEmpty():
+    return len(receipts.value) == 0    
 ---
-<section>
+<!-- Hidden inputs for localStorage loading -->
+<input id="receipts-loader" @input={load_receipts_from_storage} style="display:none" />
+
+<!-- Hidden input for file upload data -->
+<input id="file-upload-data" @input={handle_file_upload} style="display:none" />
+
+<!-- localStorage persistence bridge -->
+<div id="storage-container" data-state={storage_json} style="display:none"></div>
+
+<div>
     <div style="margin-bottom: 2rem;">
-        <a href="/" style="color: #667eea; text-decoration: none;">&larr; Back to Dashboard</a>
+        <a href="/" style="color: #5568c0; text-decoration: none;">&larr; Back to Dashboard</a>
     </div>
 
     <h1>Medical Receipts & HSA Tracking</h1>
     <p>Track medical expenses and manage HSA-eligible reimbursements.</p>
 
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
-        <div style="padding: 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: white;">
-            <div style="font-size: 0.9rem; opacity: 0.9;">Total Medical Expenses</div>
-            <div style="font-size: 2rem; font-weight: bold; margin: 0.5rem 0;">${'{:,.2f}'.format(total_expenses)}</div>
-            <div style="font-size: 0.85rem; opacity: 0.8;">Year to date (2024)</div>
+    <!-- Summary Cards -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin: 0 0 2rem 0; align-items: start;">
+        <div style="padding: 1.5rem; background: linear-gradient(135deg, #4e62c8 0%, #8030b8 100%); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: white; border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column;">
+            <div style="font-size: 0.9rem; opacity: 0.9; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, white 72%, transparent 100%); -webkit-mask-image: linear-gradient(to right, white 72%, transparent 100%);">Total Medical Expenses</div>
+            <div style="font-size: 2rem; font-weight: bold; margin: 0.5rem 0;">${'{:,.0f}'.format(calc_total_expenses())}</div>
+            <div style="font-size: 0.85rem; opacity: 0.8; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, white 72%, transparent 100%); -webkit-mask-image: linear-gradient(to right, white 72%, transparent 100%);">{len(receipts)} receipts</div>
         </div>
 
-        <div style="padding: 1.5rem; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: white;">
-            <div style="font-size: 0.9rem; opacity: 0.9;">Reimbursed</div>
-            <div style="font-size: 2rem; font-weight: bold; margin: 0.5rem 0;">${'{:,.2f}'.format(total_reimbursed)}</div>
-            <div style="font-size: 0.85rem; opacity: 0.8;">{int((total_reimbursed / total_expenses) * 100)}% of total</div>
+        <div style="padding: 1.5rem; background: linear-gradient(135deg, #28a860 0%, #108898 100%); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: white; border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column;">
+            <div style="font-size: 0.9rem; opacity: 0.9; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, white 72%, transparent 100%); -webkit-mask-image: linear-gradient(to right, white 72%, transparent 100%);">Reimbursed</div>
+            <div style="font-size: 2rem; font-weight: bold; margin: 0.5rem 0;">${'{:,.0f}'.format(calc_total_reimbursed())}</div>
+            <div style="font-size: 0.85rem; opacity: 0.8; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, white 72%, transparent 100%); -webkit-mask-image: linear-gradient(to right, white 72%, transparent 100%);">{get_reimbursed_percent()}% of total</div>
         </div>
 
-        <div style="padding: 1.5rem; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: white;">
-            <div style="font-size: 0.9rem; opacity: 0.9;">Pending Reimbursement</div>
-            <div style="font-size: 2rem; font-weight: bold; margin: 0.5rem 0;">${'{:,.2f}'.format(total_pending)}</div>
-            <div style="font-size: 0.85rem; opacity: 0.8;">Available to claim</div>
+        <div style="padding: 1.5rem; background: linear-gradient(135deg, #c038a8 0%, #b82040 100%); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: white; border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column;">
+            <div style="font-size: 0.9rem; opacity: 0.9; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, white 72%, transparent 100%); -webkit-mask-image: linear-gradient(to right, white 72%, transparent 100%);">Pending</div>
+            <div style="font-size: 2rem; font-weight: bold; margin: 0.5rem 0;">${'{:,.0f}'.format(calc_total_pending())}</div>
+            <div style="font-size: 0.85rem; opacity: 0.8; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, white 72%, transparent 100%); -webkit-mask-image: linear-gradient(to right, white 72%, transparent 100%);">Available to claim</div>
         </div>
 
-        <div style="padding: 1.5rem; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: white;">
-            <div style="font-size: 0.9rem; opacity: 0.9;">HSA Eligible</div>
-            <div style="font-size: 2rem; font-weight: bold; margin: 0.5rem 0;">${'{:,.2f}'.format(hsa_eligible)}</div>
-            <div style="font-size: 0.85rem; opacity: 0.8;">100% of expenses</div>
+        <div style="padding: 1.5rem; background: linear-gradient(135deg, #2868cc 0%, #0898a8 100%); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: white; border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column;">
+            <div style="font-size: 0.9rem; opacity: 0.9; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, white 72%, transparent 100%); -webkit-mask-image: linear-gradient(to right, white 72%, transparent 100%);">Earnings (Est.)</div>
+            <div style="font-size: 2rem; font-weight: bold; margin: 0.5rem 0;">${'{:,.0f}'.format(calc_earnings_while_pending())}</div>
+            <div style="font-size: 0.85rem; opacity: 0.8; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, white 72%, transparent 100%); -webkit-mask-image: linear-gradient(to right, white 72%, transparent 100%);">At {hsa_annual_return}% while pending</div>
         </div>
-    </div>
 
-    <div style="margin-top: 3rem;">
-        <h2>Expense Breakdown by Category</h2>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin: 1.5rem 0;">
-            <div $for={(cat, amount) in category_totals.items()} style="padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 4px solid #667eea;">
-                <div style="font-size: 0.85rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px;">{cat}</div>
-                <div style="font-size: 1.5rem; font-weight: bold; color: #333; margin-top: 0.25rem;">${'{:,.2f}'.format(amount)}</div>
-            </div>
+        <div style="padding: 1.5rem; background: linear-gradient(135deg, #b05878 0%, #b08820 100%); border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: white; border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column;">
+            <div style="font-size: 0.9rem; opacity: 0.9; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, white 72%, transparent 100%); -webkit-mask-image: linear-gradient(to right, white 72%, transparent 100%);">Tax Savings (Est.)</div>
+            <div style="font-size: 2rem; font-weight: bold; margin: 0.5rem 0;">${'{:,.0f}'.format(calc_tax_savings())}</div>
+            <div style="font-size: 0.85rem; opacity: 0.8; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, white 72%, transparent 100%); -webkit-mask-image: linear-gradient(to right, white 72%, transparent 100%);">At {user_tax_bracket}% tax bracket</div>
         </div>
     </div>
 
-    <div style="margin-top: 3rem;">
-        <h2>Receipt History</h2>
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-top: 2rem;">
+        <h2 style="margin: 0;">Receipt History</h2>
+        <div style="display: flex; gap: 0.5rem;">
+            <button @click={open_add_modal} style="padding: 0.35rem 1rem; background: #5568c0; border: 1.5px solid #5568c0; color: white; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 0.875rem;">
+                ➕ Add Receipt
+            </button>
+            <button onclick="exportCSV()" style="padding: 0.35rem 1rem; background: #3d7a50; border: 1.5px solid #3d7a50; color: white; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 0.875rem;">
+                📊 Export to CSV
+            </button>
+            <button onclick="exportPDF()" style="padding: 0.35rem 1rem; background: #c0202e; border: 1.5px solid #c0202e; color: white; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 0.875rem;">
+                📄 Export to PDF
+            </button>
+        </div>
+    </div>
+
+    <div style="margin-top: 1rem;">
+        <!-- Receipt History Table -->
         <div style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;">
+            <table style="width: 100%; border-collapse: collapse; background: var(--pico-card-background-color, #fff); box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; border: 1px solid var(--pico-muted-border-color, #e5e7eb);">
                 <thead>
-                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
-                        <th style="padding: 1rem; text-align: left; font-weight: 600; color: #495057;">Date</th>
-                        <th style="padding: 1rem; text-align: left; font-weight: 600; color: #495057;">Provider</th>
-                        <th style="padding: 1rem; text-align: left; font-weight: 600; color: #495057;">Category</th>
-                        <th style="padding: 1rem; text-align: left; font-weight: 600; color: #495057;">Description</th>
-                        <th style="padding: 1rem; text-align: right; font-weight: 600; color: #495057;">Amount</th>
-                        <th style="padding: 1rem; text-align: center; font-weight: 600; color: #495057;">Status</th>
+                    <tr style="background: var(--pico-table-row-stripped-background-color, #f8f9fa); border-bottom: 2px solid var(--pico-muted-border-color, #dee2e6);">
+                        <th @click={sort_by("date")} style="padding: 1rem; text-align: left; font-weight: 600; color: var(--pico-color, #495057); cursor: pointer;">
+                            Date {('↓' if sort_direction == 'desc' else '↑') if sort_column == 'date' else ''}
+                        </th>
+                        <th @click={sort_by("provider")} style="padding: 1rem; text-align: left; font-weight: 600; color: var(--pico-color, #495057); cursor: pointer;">
+                            Provider {('↓' if sort_direction == 'desc' else '↑') if sort_column == 'provider' else ''}
+                        </th>
+                        <th @click={sort_by("category")} style="padding: 1rem; text-align: left; font-weight: 600; color: var(--pico-color, #495057); cursor: pointer;">
+                            Category {('↓' if sort_direction == 'desc' else '↑') if sort_column == 'category' else ''}
+                        </th>
+                        <th @click={sort_by("description")} style="padding: 1rem; text-align: left; font-weight: 600; color: var(--pico-color, #495057); cursor: pointer;">
+                            Description {('↓' if sort_direction == 'desc' else '↑') if sort_column == 'description' else ''}
+                        </th>
+                        <th @click={sort_by("amount")} style="padding: 1rem; text-align: right; font-weight: 600; color: var(--pico-color, #495057); cursor: pointer;">
+                            Amount {('↓' if sort_direction == 'desc' else '↑') if sort_column == 'amount' else ''}
+                        </th>
+                        <th @click={sort_by("reimbursed")} style="padding: 1rem; text-align: center; font-weight: 600; color: var(--pico-color, #495057); cursor: pointer;">
+                            Status {('↓' if sort_direction == 'desc' else '↑') if sort_column == 'reimbursed' else ''}
+                        </th>
+                        <th style="padding: 1rem; text-align: center; font-weight: 600; color: var(--pico-color, #495057);">Image</th>
+                        <th style="padding: 1rem; text-align: center; font-weight: 600; color: var(--pico-color, #495057);">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr $for={receipt in receipts} style="border-bottom: 1px solid #dee2e6;">
-                        <td style="padding: 1rem; color: #212529;">{receipt['date']}</td>
-                        <td style="padding: 1rem; color: #212529;">{receipt['provider']}</td>
+                    <tr $for={(i, receipt) in enumerate(filtered_sorted_receipts())} style="border-bottom: 1px solid var(--pico-muted-border-color, #dee2e6);">
+                        <td style="padding: 1rem; color: var(--pico-color, #212529);">{receipt.get('date', '')}</td>
+                        <td style="padding: 1rem; color: var(--pico-color, #212529);">{receipt.get('provider', '')}</td>
                         <td style="padding: 1rem;">
-                            <span style="padding: 0.25rem 0.75rem; background: {'#e7f3ff' if receipt['category'] == 'Medical' else '#fff0f6' if receipt['category'] == 'Dental' else '#f0fff4' if receipt['category'] == 'Vision' else '#fff8e1'}; color: {'#0066cc' if receipt['category'] == 'Medical' else '#cc0066' if receipt['category'] == 'Dental' else '#00a86b' if receipt['category'] == 'Vision' else '#f57c00'}; border-radius: 12px; font-size: 0.85rem; font-weight: 500;">
-                                {receipt['category']}
+                            <span style="padding: 0.25rem 0.75rem; background: transparent; border: 1.5px solid {'#4070b0' if receipt.get('category') == 'Medical' else '#9e4d8a' if receipt.get('category') == 'Dental' else '#3d7a50' if receipt.get('category') == 'Vision' else '#a06e18'}; color: {'#4070b0' if receipt.get('category') == 'Medical' else '#9e4d8a' if receipt.get('category') == 'Dental' else '#3d7a50' if receipt.get('category') == 'Vision' else '#a06e18'}; border-radius: 12px; font-size: 0.85rem; font-weight: 500;">
+                                {receipt.get('category', 'Other')}
                             </span>
                         </td>
-                        <td style="padding: 1rem; color: #666;">{receipt['description']}</td>
-                        <td style="padding: 1rem; text-align: right; color: #212529; font-weight: 600;">${'{:,.2f}'.format(receipt['amount'])}</td>
+                        <td style="padding: 1rem; color: var(--pico-muted-color, #666);">{receipt.get('description', '')}</td>
+                        <td style="padding: 1rem; text-align: right; color: var(--pico-color, #212529); font-weight: 600;">${'{:,.2f}'.format(receipt.get('amount', 0))}</td>
                         <td style="padding: 1rem; text-align: center;">
-                            <span style="padding: 0.25rem 0.75rem; background: {'#d4edda' if receipt['reimbursed'] else '#fff3cd'}; color: {'#155724' if receipt['reimbursed'] else '#856404'}; border-radius: 12px; font-size: 0.85rem; font-weight: 500;">
-                                {'✓ Reimbursed' if receipt['reimbursed'] else '⏳ Pending'}
+                            <span @click={toggle_reimbursed(receipt)} style="padding: 0.25rem 0.75rem; background: transparent; border: 1.5px solid {'#3d7a50' if receipt.get('reimbursed') else '#a06e18'}; color: {'#3d7a50' if receipt.get('reimbursed') else '#a06e18'}; border-radius: 12px; font-size: 0.85rem; font-weight: 500; cursor: pointer;">
+                                {'✓ Reimbursed' if receipt.get('reimbursed') else '⏳ Pending'}
                             </span>
+                        </td>
+                        <td style="padding: 1rem; text-align: center;">
+                            <span $if={receipt.get('thumbnail')}><span style="cursor: pointer; font-size: 1.5rem;" title="View receipt image" onclick="showImagePreview('{receipt.get('thumbnail', '')}')">
+                                🖼️
+                            </span></span>
+                        </td>
+                        <td style="padding: 1rem; text-align: center;">
+                            <button @click={edit_receipt(receipt)} style="padding: 0.25rem 0.75rem; background: #5568c0; border: 1.5px solid #5568c0; color: white; border-radius: 4px; cursor: pointer; margin-right: 0.5rem; font-size: 0.875rem;">
+                                ✏️ Edit
+                            </button>
+                            <button @click={delete_receipt(receipt.get('id', ''))} onclick="return confirm('Delete this receipt?')" style="padding: 0.25rem 0.75rem; background: #c0202e; border: 1.5px solid #c0202e; color: white; border-radius: 4px; cursor: pointer; font-size: 0.875rem;">
+                                🗑️ Delete
+                            </button>
                         </td>
                     </tr>
                 </tbody>
             </table>
+
+            <div $if={isReceiptsEmpty()}>
+                <div style="padding: 3rem; text-align: center; color: var(--pico-muted-color, #666); background: var(--pico-card-background-color, #fff);">
+                    <p style="font-size: 1.2rem; margin-bottom: 1rem;">No receipts found</p>
+                    <p style="margin-bottom: 1.5rem;">Get started by adding your first medical receipt</p>
+                    <button @click={open_add_modal} style="padding: 0.75rem 1.5rem; background: transparent; border: 1.5px solid #5568c0; color: #5568c0; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 1rem;">
+                        ➕ Add Your First Receipt
+                    </button>
+                </div>
+            </div>
         </div>
 
-        <div style="margin-top: 2rem; padding: 1.5rem; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 8px;">
+        <!-- HSA Tips -->
+        <div style="margin-top: 2rem; padding: 1.5rem; background: var(--pico-card-background-color, #e8f5e9); border-left: 4px solid #4caf50; border-radius: 8px; border: 1px solid var(--pico-muted-border-color, #4caf50);">
             <h3 style="margin: 0 0 0.5rem 0; color: #2e7d32; font-size: 1.1rem;">💡 HSA Tips</h3>
-            <ul style="margin: 0; padding-left: 1.5rem; color: #666;">
+            <ul style="margin: 0; padding-left: 1.5rem; color: var(--pico-muted-color, #666);">
                 <li style="margin-bottom: 0.5rem;">Save all medical receipts - you can reimburse yourself years later</li>
                 <li style="margin-bottom: 0.5rem;">HSA contributions are tax-deductible and grow tax-free</li>
                 <li style="margin-bottom: 0.5rem;">After age 65, HSA funds can be used for non-medical expenses (taxed as income)</li>
@@ -215,4 +570,523 @@ for receipt in receipts:
             </ul>
         </div>
     </div>
-</section>
+</div>
+
+<style>
+    @keyframes modal-overlay-in  { from { opacity:0; backdrop-filter:blur(0); } to { opacity:1; backdrop-filter:blur(7px); } }
+    @keyframes modal-overlay-out { from { opacity:1; backdrop-filter:blur(7px); } to { opacity:0; backdrop-filter:blur(0); } }
+    @keyframes modal-card-in {
+        0%   { opacity:0; transform:translateY(-56px) scale(0.93); }
+        60%  { opacity:1; transform:translateY(10px) scale(1.02); }
+        80%  { transform:translateY(-4px) scale(0.99); }
+        100% { transform:translateY(0) scale(1); }
+    }
+    @keyframes modal-card-out { from { opacity:1; transform:translateY(0) scale(1); } to { opacity:0; transform:translateY(-36px) scale(0.95); } }
+    .modal-backdrop { animation: modal-overlay-in 0.28s ease forwards; -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px); }
+    .modal-backdrop.closing { animation: modal-overlay-out 0.18s ease forwards; }
+    .modal-card { animation: modal-card-in 0.42s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+    .modal-card.closing { animation: modal-card-out 0.18s ease forwards; }
+</style>
+
+<!-- Modal Dialog -->
+<div class="modal-backdrop" style="display: {'flex' if show_modal else 'none'}; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.55); z-index: 9999; align-items: center; justify-content: center;" onmousedown="if(event.target===this)this.dataset.backdropDown='1';" onclick="if(event.target===this&&this.dataset.backdropDown){window._closeModal();}delete this.dataset.backdropDown;">
+    <div class="modal-card" style="background: var(--pico-card-background-color, white); padding: 2rem 2rem 0 2rem; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,0.45); position: relative;">
+        <button id="modal-close-x" @click={close_modal} style="display:none;"></button>
+        <button onclick="window._closeModal();" style="position: absolute; top: 2rem; right: 2rem; background: none; border: none; font-size: 1.4rem; cursor: pointer; color: #666; line-height: 1; padding: 0.25rem 0.5rem;">&times;</button>
+        <h2 style="margin-top: 0; color: var(--pico-color, inherit);">{edit_mode and 'Edit Receipt' or 'Add New Receipt'}</h2>
+
+        <!-- Error Message Display -->
+        <div $if={form_error}><div style="background: var(--pico-form-element-invalid-focus-color, #fee); border: 2px solid var(--pico-form-element-invalid-border-color, #a03040); color: var(--pico-form-element-invalid-border-color, #c33); padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.95rem;">
+            <strong style="font-weight: 600;">⚠️ Validation Error</strong>
+            <div style="margin-top: 0.5rem;">{form_error}</div>
+        </div></div>
+
+        <form @submit.prevent={handle_form_submit}>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div>
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--pico-color, inherit);">Date *</label>
+                    <input
+                        type="date"
+                        value={form_date}
+                        @input={update_form_date}
+                        required
+                    />
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--pico-color, inherit);">Category *</label>
+                    <select
+                        value={form_category}
+                        @change={update_form_category}
+                    >
+                        <option value="Medical">Medical</option>
+                        <option value="Dental">Dental</option>
+                        <option value="Vision">Vision</option>
+                        <option value="Prescription">Prescription</option>
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--pico-color, inherit);">Provider *</label>
+                <input
+                    type="text"
+                    class="form-input-magic"
+                    value={form_provider}
+                    @input={update_form_provider}
+                    placeholder="e.g., City General Hospital"
+                    required
+                />
+            </div>
+
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--pico-color, inherit);">Description</label>
+                <textarea
+                    value={form_description}
+                    @input={update_form_description}
+                    placeholder="e.g., Annual physical exam"
+                    rows="3"
+                ></textarea>
+            </div>
+
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--pico-color, inherit);">Amount *</label>
+                <div style="position: relative; display: flex; align-items: center;">
+                    <span style="position: absolute; left: 0.75rem; color: var(--pico-muted-color, #777); pointer-events: none; font-size: 1rem; line-height: 1; z-index: 1;">$</span>
+                    <input
+                        type="text"
+                        class="amount-dollar-input"
+                        style="padding-left: 1.75rem; width: 100%; margin: 0;"
+                        data-initial-value={form_amount}
+                        placeholder="0.00"
+                        @input={update_form_amount}
+                        required
+                    />
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 2rem; margin-bottom: 1rem;">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input
+                        type="checkbox"
+                        checked={form_hsa_eligible}
+                        @change={update_form_hsa_eligible}
+                        style="margin-right: 0.5rem;"
+                    />
+                    <span style="font-weight: 500; color: var(--pico-color, inherit);">HSA Eligible</span>
+                </label>
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input
+                        type="checkbox"
+                        checked={form_reimbursed}
+                        @change={update_form_reimbursed}
+                        style="margin-right: 0.5rem;"
+                    />
+                    <span style="font-weight: 500; color: var(--pico-color, inherit);">Already Reimbursed</span>
+                </label>
+            </div>
+
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--pico-color, inherit);">Receipt Image</label>
+                <input
+                    id="receipt-image-upload"
+                    type="file"
+                    accept="image/*"
+                    style="display: none;"
+                />
+                <button type="button" onclick="document.getElementById('receipt-image-upload').click()" style="padding: 0.5rem 1rem; background: var(--pico-secondary, #6c757d); color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    📎 Upload Image
+                </button>
+                <small style="display: block; margin-top: 0.25rem; color: var(--pico-muted-color, #666);">Max 2MB. Image will be compressed automatically.</small>
+
+                <div $if={form_image_thumbnail}><div style="margin-top: 1rem; position: relative; display: inline-block;">
+                    <img src={form_image_thumbnail} style="max-width: 200px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" />
+                    <button type="button" @click={clear_image} style="position: absolute; top: -8px; right: -8px; width: 24px; height: 24px; padding: 0; background: #a03040; color: white; border: none; border-radius: 50%; cursor: pointer; font-size: 0.875rem;">
+                        ✕
+                    </button>
+                </div></div>
+            </div>
+
+            <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 1.5rem;">
+                <button type="button" onclick="window._closeModal();" style="padding: 0.75rem 1.5rem; background: var(--pico-secondary, #6c757d); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                    Cancel
+                </button>
+                <button type="submit" style="padding: 0.75rem 1.5rem; background: var(--pico-primary, #5568c0); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                    {edit_mode and '✓ Update' or '✓ Save'}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- JavaScript for localStorage, image compression, and export -->
+<script>
+// ===== LOCALSTORAGE BRIDGE =====
+
+document.addEventListener('DOMContentLoaded', function() {
+    const storageContainer = document.getElementById('storage-container');
+    const receiptsLoader = document.getElementById('receipts-loader');
+
+    // Clear-on-focus behavior for tax bracket input
+    const taxBracketInput = document.querySelector('.tax-bracket-input');
+    if (taxBracketInput) {
+        taxBracketInput.addEventListener('focus', function() {
+            this.dataset.oldValue = this.value;
+            this.placeholder = this.value;
+            this.value = '';
+        });
+        taxBracketInput.addEventListener('blur', function() {
+            if (this.value === '' && this.dataset.oldValue) {
+                this.value = this.dataset.oldValue;
+            }
+            delete this.dataset.oldValue;
+        });
+    }
+
+    // Clear-on-focus behavior for form inputs (delegated, modal renders dynamically)
+    document.addEventListener('focus', function(e) {
+        if (e.target.classList && e.target.classList.contains('form-input-magic') && e.target.value) {
+            e.target.dataset.oldValue = e.target.value;
+            e.target.placeholder = e.target.value;
+            e.target.value = '';
+        }
+    }, true);
+    document.addEventListener('blur', function(e) {
+        if (e.target.classList && e.target.classList.contains('form-input-magic')) {
+            if (e.target.value === '' && e.target.dataset.oldValue) {
+                e.target.value = e.target.dataset.oldValue;
+            }
+            delete e.target.dataset.oldValue;
+            // Re-sync the wire to whatever is displayed — handles the case where the
+            // user deleted all their typing and form-input-magic restored the old value
+            // without firing an input event.
+            var ev = new Event('input', { bubbles: true });
+            e.target.dispatchEvent(ev);
+        }
+    }, true);
+
+    // SAVE: Watch for changes and write to localStorage
+    if (storageContainer) {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'data-state') {
+                    const data = storageContainer.dataset.state;
+                    localStorage.setItem('medical_receipts_data', data);
+                }
+            });
+        });
+        observer.observe(storageContainer, { attributes: true });
+    }
+
+    // LOAD: Read from localStorage on page load
+    const savedData = localStorage.getItem('medical_receipts_data');
+
+    if (savedData && receiptsLoader) {
+        // Wait a bit for PyWire to initialize
+        setTimeout(() => {
+            // Set the input value directly
+            receiptsLoader.value = savedData;
+
+            // Create a proper input event
+            const inputEvent = new Event('input', { bubbles: true });
+
+            // PyWire looks for event.value
+            Object.defineProperty(inputEvent, 'value', {
+                value: savedData,
+                writable: false,
+                enumerable: true
+            });
+
+            receiptsLoader.dispatchEvent(inputEvent);
+        }, 100);
+    }
+
+});
+
+// ===== IMAGE COMPRESSION =====
+// Use event delegation since PyWire renders elements dynamically
+
+document.addEventListener('change', async function(e) {
+    if (e.target && e.target.id === 'receipt-image-upload') {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Check size
+        if (file.size > 2 * 1024 * 1024) {
+            alert('Image too large. Please use an image under 2MB.');
+            e.target.value = '';
+            return;
+        }
+
+        // Check type
+        if (!file.type.startsWith('image/')) {
+            alert('Please upload an image file.');
+            e.target.value = '';
+            return;
+        }
+
+        try {
+            // Compress images
+            const base64 = await compressImage(file, 500);
+            const thumbnail = await compressImage(file, 50);
+
+            const data = JSON.stringify({
+                filename: file.name,
+                base64: base64,
+                thumbnail: thumbnail
+            });
+
+            // Dispatch to hidden input which triggers PyWire handler
+            const hiddenInput = document.getElementById('file-upload-data');
+            if (hiddenInput) {
+                const inputEvent = new Event('input', { bubbles: true });
+                Object.defineProperty(inputEvent, 'value', { value: data, writable: false });
+                hiddenInput.dispatchEvent(inputEvent);
+            }
+
+            // Clear the file input
+            e.target.value = '';
+        } catch (error) {
+            console.error('Image compression error:', error);
+            alert('Error processing image. Please try another file.');
+            e.target.value = '';
+        }
+    }
+}, true);
+
+async function compressImage(file, maxKB) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+
+                // Calculate scaling
+                const maxDimension = maxKB < 100 ? 200 : 1200;
+                if (width > height && width > maxDimension) {
+                    height = (height / width) * maxDimension;
+                    width = maxDimension;
+                } else if (height > maxDimension) {
+                    width = (width / height) * maxDimension;
+                    height = maxDimension;
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+
+                // Compress iteratively to target size
+                let quality = 0.9;
+                let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+                while (dataUrl.length > maxKB * 1024 * 1.37 && quality > 0.1) {
+                    quality -= 0.1;
+                    dataUrl = canvas.toDataURL('image/jpeg', quality);
+                }
+
+                resolve(dataUrl);
+            };
+            img.onerror = () => reject(new Error('Failed to load image'));
+            img.src = e.target.result;
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+    });
+}
+
+// ===== IMAGE PREVIEW =====
+
+function showImagePreview(thumbnail) {
+    if (!thumbnail) return;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 2000; cursor: pointer;';
+    modal.onclick = () => modal.remove();
+
+    const img = document.createElement('img');
+    img.src = thumbnail;
+    img.style.cssText = 'max-width: 90%; max-height: 90%; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);';
+
+    modal.appendChild(img);
+    document.body.appendChild(modal);
+}
+
+// ===== CSV EXPORT =====
+
+function exportCSV() {
+    const data = localStorage.getItem('medical_receipts_data');
+    if (!data) {
+        alert('No receipts to export');
+        return;
+    }
+
+    const parsed = JSON.parse(data);
+    const receipts = Object.values(parsed.receipts || {});
+
+    if (receipts.length === 0) {
+        alert('No receipts to export');
+        return;
+    }
+
+    let csv = 'Date,Provider,Category,Description,Amount,HSA Eligible,Reimbursed\n';
+    receipts.forEach(r => {
+        const description = (r.description || '').replace(/"/g, '""');
+        const provider = (r.provider || '').replace(/"/g, '""');
+        csv += `${r.date || ''},"${provider}","${r.category || ''}","${description}",${r.amount || 0},${r.hsa_eligible ? 'Yes' : 'No'},${r.reimbursed ? 'Yes' : 'No'}\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `medical_receipts_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// ===== PDF EXPORT =====
+
+function exportPDF() {
+    const data = localStorage.getItem('medical_receipts_data');
+    if (!data) {
+        alert('No receipts to export. Please install jsPDF library.');
+        return;
+    }
+
+    const parsed = JSON.parse(data);
+    const receipts = Object.values(parsed.receipts || {});
+
+    if (receipts.length === 0) {
+        alert('No receipts to export');
+        return;
+    }
+
+    // Simple PDF export using browser print
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write('<html><head><title>Medical Receipts</title>');
+    printWindow.document.write('<style>body { font-family: Arial, sans-serif; padding: 20px; } table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #ddd; padding: 8px; text-align: left; } th { background-color: #f2f2f2; }</style>');
+    printWindow.document.write('</head><body>');
+    printWindow.document.write('<h1>Medical Receipts</h1>');
+    printWindow.document.write('<table><thead><tr><th>Date</th><th>Provider</th><th>Category</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead><tbody>');
+
+    receipts.forEach(r => {
+        printWindow.document.write(`<tr>
+            <td>${r.date || ''}</td>
+            <td>${r.provider || ''}</td>
+            <td>${r.category || ''}</td>
+            <td>${r.description || ''}</td>
+            <td>$${(r.amount || 0).toFixed(2)}</td>
+            <td>${r.reimbursed ? 'Reimbursed' : 'Pending'}</td>
+        </tr>`);
+    });
+
+    printWindow.document.write('</tbody></table>');
+    printWindow.document.write('<' + '/body><' + '/html>');
+    printWindow.document.close();
+    printWindow.print();
+}
+</script>
+
+<script>
+(function () {
+    // Amount dollar input: focus → move value to placeholder, clear
+    document.addEventListener('focus', function (e) {
+        var input = e.target;
+        if (!input.classList || !input.classList.contains('amount-dollar-input')) return;
+        if (input.value) {
+            input.dataset.preFocusValue = input.value;
+            input.placeholder = input.value;
+            input.value = '';
+        }
+    }, true);
+
+    // Live comma formatting for the amount input (deferred PyWire update until blur)
+    document.addEventListener('input', function (e) {
+        var input = e.target;
+        if (!input.classList || !input.classList.contains('amount-dollar-input')) return;
+        if (e.isFinalUpdate) return;
+        var raw = input.value.replace(/[^\d.]/g, '');
+        var parts = raw.split('.');
+        if (parts.length > 2) raw = parts[0] + '.' + parts[1];
+        var dotIdx = raw.indexOf('.');
+        var intPart = dotIdx >= 0 ? raw.slice(0, dotIdx) : raw;
+        var decPart = dotIdx >= 0 ? raw.slice(dotIdx) : '';
+        input.value = (intPart ? parseInt(intPart, 10).toLocaleString('en-US') : '') + decPart;
+        e.stopImmediatePropagation();
+    }, true);
+
+    // On blur: restore if empty, finalize to X,XXX.XX, dispatch to PyWire
+    document.addEventListener('blur', function (e) {
+        var input = e.target;
+        if (!input.classList || !input.classList.contains('amount-dollar-input')) return;
+        if (input.value === '' && input.dataset.preFocusValue) {
+            input.value = input.dataset.preFocusValue;
+        }
+        delete input.dataset.preFocusValue;
+        var raw = input.value.replace(/[^\d.]/g, '');
+        var num = parseFloat(raw) || 0;
+        input.value = num > 0
+            ? num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            : '';
+        input.placeholder = '0.00';
+        var ev = new Event('input', { bubbles: true });
+        ev.isFinalUpdate = true;
+        input.dispatchEvent(ev);
+    }, true);
+
+    window._closeModal = function () {
+        var backdrop = document.querySelector('.modal-backdrop');
+        var card = document.querySelector('.modal-card');
+        if (backdrop) backdrop.classList.add('closing');
+        if (card) card.classList.add('closing');
+        setTimeout(function () {
+            var trigger = document.getElementById('modal-close-x');
+            if (trigger) trigger.click();
+        }, 175);
+    };
+
+    // When the modal's display style changes, handle opening/animation states
+    new MutationObserver(function (mutations) {
+        mutations.forEach(function (m) {
+            if (!m.target.classList || !m.target.classList.contains('modal-backdrop')) return;
+            var backdrop = m.target;
+            if (backdrop.style.display === 'flex') {
+                backdrop.classList.remove('closing');
+                var card = backdrop.querySelector('.modal-card');
+                if (card) card.classList.remove('closing');
+
+                // Explicitly reset all form inputs when the modal opens.
+                // PyWire updates HTML attributes on re-render but DOM diffing may skip
+                // resetting the .value property on inputs the user previously modified.
+
+                // Text inputs with form-input-magic: reset value and clear stale oldValue
+                backdrop.querySelectorAll('.form-input-magic').forEach(function (inp) {
+                    delete inp.dataset.oldValue;
+                    inp.value = inp.getAttribute('value') || '';
+                    inp.placeholder = inp.getAttribute('placeholder') || '';
+                });
+
+                // Date input
+                var dateInput = backdrop.querySelector('input[type="date"]');
+                if (dateInput) dateInput.value = dateInput.getAttribute('value') || '';
+
+                // Textarea
+                var textarea = backdrop.querySelector('textarea');
+                if (textarea) textarea.value = textarea.getAttribute('value') || '';
+
+                // Amount input
+                var amountInput = backdrop.querySelector('.amount-dollar-input');
+                if (amountInput) {
+                    var num = parseFloat((amountInput.dataset.initialValue || '').replace(',', '')) || 0;
+                    amountInput.value = num > 0
+                        ? num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        : '';
+                }
+            }
+        });
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ['style'], subtree: true });
+})();
+</script>

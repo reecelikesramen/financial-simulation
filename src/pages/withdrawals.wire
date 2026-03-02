@@ -1,5 +1,46 @@
 ---
+import json
 from datetime import datetime
+
+assets_json = wire(json.dumps([
+    {"name": "Stocks", "amount": 60000, "return_rate": 0.10},
+    {"name": "Bonds",  "amount": 30000, "return_rate": 0.04},
+    {"name": "Bills",  "amount": 10000, "return_rate": 0.015},
+]))
+
+def update_assets(event):
+    try:
+        json.loads(str(event.value))
+        assets_json.value = str(event.value)
+    except (ValueError, TypeError):
+        pass
+
+def calc_chart_data():
+    try:
+        assets = json.loads(assets_json.value)
+    except (ValueError, TypeError):
+        assets = []
+
+    if not assets:
+        return json.dumps({"years": [], "datasets": []})
+
+    current_year = datetime.now().year
+    n_years = 20
+    years = list(range(current_year, current_year + n_years + 1))
+
+    balances = [float(a.get("amount", 0)) for a in assets]
+    rates = [float(a.get("return_rate", 0.07)) for a in assets]
+    datasets = [{"label": str(a.get("name", f"Asset {i+1}")), "data": []} for i, a in enumerate(assets)]
+
+    for i in range(len(years)):
+        if i > 0:
+            balances = [b * (1 + r) for b, r in zip(balances, rates)]
+        total = sum(balances)
+        for j, b in enumerate(balances):
+            pct = round(b / total * 100, 1) if total > 0 else 0
+            datasets[j]["data"].append(pct)
+
+    return json.dumps({"years": years, "datasets": datasets})
 
 # Sample withdrawal plan data
 current_age = 45
@@ -103,4 +144,258 @@ safe_annual_withdrawal = projected_balance * 0.04
             </ul>
         </div>
     </div>
+
+    <div style="margin-top: 3rem;">
+        <h2>Asset Balances</h2>
+        <p style="color: #666; margin-bottom: 1.5rem;">Add your assets with current values and expected annual returns to project your allocation over time.</p>
+
+        <div style="display: grid; grid-template-columns: 2fr 2fr 1fr auto; gap: 0.75rem; padding: 0 0.5rem; margin-bottom: 0.5rem;">
+            <div style="font-size: 0.8rem; font-weight: 600; color: #6c757d; text-transform: uppercase; letter-spacing: 0.05em;">Name</div>
+            <div style="font-size: 0.8rem; font-weight: 600; color: #6c757d; text-transform: uppercase; letter-spacing: 0.05em;">Amount</div>
+            <div style="font-size: 0.8rem; font-weight: 600; color: #6c757d; text-transform: uppercase; letter-spacing: 0.05em;">Avg Return</div>
+            <div></div>
+        </div>
+
+        <div $permanent id="assets-list" style="display: flex; flex-direction: column; gap: 0.5rem;"></div>
+
+        <button id="add-asset-btn" style="margin-top: 0.75rem; padding: 0.6rem 1rem; width: 100%; background: transparent; border: 2px dashed #dee2e6; border-radius: 8px; color: #6c757d; cursor: pointer; font-size: 0.95rem; transition: all 0.2s;" onmouseover="this.style.borderColor='#adb5bd'; this.style.color='#495057';" onmouseout="this.style.borderColor='#dee2e6'; this.style.color='#6c757d';">
+            + Add Asset
+        </button>
+
+        <input type="text" id="assets-input"
+               data-initial-value={assets_json.value}
+               @input={update_assets}
+               style="display: none;" />
+    </div>
+
+    <div style="margin-top: 3rem;">
+        <h2>Asset Allocation</h2>
+        <div $permanent id="chart-container" data-chart={calc_chart_data()} style="background: white; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 1.5rem;">
+            <canvas id="withdrawalsChart" style="max-height: 400px;"></canvas>
+        </div>
+    </div>
 </section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+    (function () {
+        var COLORS = [
+            'rgba(15,  76,  129, 0.85)',  // sapphire
+            'rgba(0,  140,  140, 0.85)',  // teal
+            'rgba(0,  130,   80, 0.85)',  // forest
+            'rgba(180, 120,  20, 0.85)',  // gold
+            'rgba(190,  70,  30, 0.85)',  // rust
+            'rgba(140,  30,  60, 0.85)',  // burgundy
+            'rgba(90,   50, 160, 0.85)',  // plum
+            'rgba(50,  100, 170, 0.85)',  // slate blue
+        ];
+
+        // --- Asset list state ---
+        var hiddenInput = document.getElementById('assets-input');
+        var assets = [];
+        try { assets = JSON.parse(hiddenInput.dataset.initialValue || '[]'); } catch (e) { assets = []; }
+
+        function syncToPyWire() {
+            hiddenInput.value = JSON.stringify(assets);
+            hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
+            recomputeChart();
+        }
+
+        function recomputeChart() {
+            if (!assets.length) {
+                if (chart) { chart.destroy(); chart = null; }
+                return;
+            }
+            var currentYear = new Date().getFullYear();
+            var nYears = 20;
+            var years = [];
+            for (var y = currentYear; y <= currentYear + nYears; y++) years.push(y);
+            var balances = assets.map(function (a) { return parseFloat(a.amount) || 0; });
+            var rates = assets.map(function (a) { return parseFloat(a.return_rate) || 0; });
+            var datasets = assets.map(function (a, k) {
+                return { label: a.name || ('Asset ' + (k + 1)), data: [] };
+            });
+            for (var i = 0; i <= nYears; i++) {
+                if (i > 0) {
+                    balances = balances.map(function (b, j) { return b * (1 + rates[j]); });
+                }
+                var total = balances.reduce(function (s, b) { return s + b; }, 0);
+                balances.forEach(function (b, j) {
+                    datasets[j].data.push(total > 0 ? Math.round(b / total * 1000) / 10 : 0);
+                });
+            }
+            renderChart({ years: years, datasets: datasets });
+        }
+
+        function renderAssetRows() {
+            var container = document.getElementById('assets-list');
+            container.innerHTML = '';
+
+            assets.forEach(function (asset, i) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display: grid; grid-template-columns: 2fr 2fr 1fr auto; gap: 0; column-gap: 0.75rem; align-items: center; padding: 0; border-radius: 8px;';
+
+                // --- Name input ---
+                var nameInput = document.createElement('input');
+                nameInput.type = 'text';
+                nameInput.value = asset.name;
+                nameInput.placeholder = 'Asset name';
+                nameInput.style.cssText = 'width: 100%; padding: 0.45rem 0.6rem; border: 1px solid #dee2e6; border-radius: 6px; font-size: 0.95rem; box-sizing: border-box; margin: 0;';
+                nameInput.addEventListener('blur', function () {
+                    assets[i].name = this.value.trim() || ('Asset ' + (i + 1));
+                    syncToPyWire();
+                });
+
+                // --- Amount input ---
+                var amountWrapper = document.createElement('div');
+                amountWrapper.style.cssText = 'position: relative;';
+                var dollarSign = document.createElement('span');
+                dollarSign.textContent = '$';
+                dollarSign.style.cssText = 'position: absolute; left: 0.6rem; top: 50%; -webkit-transform: translateY(-50%); transform: translateY(-50%); color: #888; pointer-events: none; font-size: 0.95rem;';
+                var amountInput = document.createElement('input');
+                amountInput.type = 'text';
+                amountInput.value = asset.amount > 0 ? Math.round(asset.amount).toLocaleString('en-US') : '';
+                amountInput.placeholder = '0';
+                amountInput.style.cssText = 'width: 100%; padding: 0.45rem 0.6rem 0.45rem 1.4rem; border: 1px solid #dee2e6; border-radius: 6px; font-size: 0.95rem; box-sizing: border-box; margin: 0;';
+                amountInput.addEventListener('focus', function () {
+                    this.dataset.old = this.value;
+                    this.placeholder = this.value || '0';
+                    this.value = '';
+                });
+                amountInput.addEventListener('input', function () {
+                    var cursor = this.selectionStart;
+                    var raw = this.value.replace(/[^\d]/g, '');
+                    var fmt = raw ? parseInt(raw, 10).toLocaleString('en-US') : '';
+                    var oldCommas = (this.value.slice(0, cursor).match(/,/g) || []).length;
+                    this.value = fmt;
+                    var newCommas = (fmt.slice(0, cursor).match(/,/g) || []).length;
+                    var pos = cursor + (newCommas - oldCommas);
+                    this.setSelectionRange(pos, pos);
+                });
+                amountInput.addEventListener('blur', function () {
+                    if (this.value === '' && this.dataset.old) this.value = this.dataset.old;
+                    else if (this.value !== '') {
+                        var n = parseInt(this.value.replace(/[^\d]/g, ''), 10) || 0;
+                        this.value = n > 0 ? n.toLocaleString('en-US') : '';
+                    }
+                    delete this.dataset.old;
+                    assets[i].amount = parseInt(this.value.replace(/[^\d]/g, ''), 10) || 0;
+                    syncToPyWire();
+                });
+                amountWrapper.appendChild(dollarSign);
+                amountWrapper.appendChild(amountInput);
+
+                // --- Return rate input ---
+                var rateWrapper = document.createElement('div');
+                rateWrapper.style.cssText = 'position: relative;';
+                var rateInput = document.createElement('input');
+                rateInput.type = 'number';
+                rateInput.value = Math.round(asset.return_rate * 1000) / 10;
+                rateInput.step = '0.1';
+                rateInput.min = '0';
+                rateInput.max = '100';
+                rateInput.style.cssText = 'width: 100%; padding: 0.45rem 1.6rem 0.45rem 0.6rem; border: 1px solid #dee2e6; border-radius: 6px; font-size: 0.95rem; box-sizing: border-box; margin: 0;';
+                rateInput.addEventListener('blur', function () {
+                    assets[i].return_rate = (parseFloat(this.value) || 0) / 100;
+                    syncToPyWire();
+                });
+                var pctSign = document.createElement('span');
+                pctSign.textContent = '%';
+                pctSign.style.cssText = 'position: absolute; right: 0.6rem; top: 50%; -webkit-transform: translateY(-50%); transform: translateY(-50%); color: #888; pointer-events: none; font-size: 0.95rem;';
+                rateWrapper.appendChild(rateInput);
+                rateWrapper.appendChild(pctSign);
+
+                // --- Remove button ---
+                var removeBtn = document.createElement('button');
+                removeBtn.textContent = '×';
+                removeBtn.title = 'Remove asset';
+                removeBtn.style.cssText = 'width: 2rem; height: 2rem; border: none; background: #fee2e2; color: #dc2626; border-radius: 6px; cursor: pointer; font-size: 1.2rem; line-height: 1; flex-shrink: 0; text-align: center; padding: 0 0 0.2rem 0;';
+                removeBtn.addEventListener('click', function () {
+                    assets.splice(i, 1);
+                    renderAssetRows();
+                    syncToPyWire();
+                });
+
+                row.appendChild(nameInput);
+                row.appendChild(amountWrapper);
+                row.appendChild(rateWrapper);
+                row.appendChild(removeBtn);
+                container.appendChild(row);
+            });
+        }
+
+        document.getElementById('add-asset-btn').addEventListener('click', function () {
+            assets.push({ name: 'New Asset', amount: 0, return_rate: 0.07 });
+            renderAssetRows();
+            syncToPyWire();
+        });
+
+        renderAssetRows();
+
+        // --- Chart ---
+        var chartContainer = document.getElementById('chart-container');
+        if (!chartContainer) return;
+        var chart = null;
+
+        function renderChart(data) {
+            if (chart) { chart.destroy(); chart = null; }
+            if (!data || !data.datasets || !data.datasets.length || !data.years || !data.years.length) return;
+            chart = new Chart(document.getElementById('withdrawalsChart'), {
+                type: 'line',
+                data: {
+                    labels: data.years,
+                    datasets: data.datasets.map(function (ds, i) {
+                        var color = COLORS[i % COLORS.length];
+                        return {
+                            label: ds.label,
+                            data: ds.data,
+                            backgroundColor: color,
+                            borderColor: 'rgba(255,255,255,0.4)',
+                            borderWidth: 1,
+                            fill: true,
+                            pointRadius: 0,
+                            tension: 0.4,
+                        };
+                    }),
+                },
+                options: {
+                    responsive: true,
+                    animation: false,
+                    scales: {
+                        x: {
+                            stacked: true,
+                            grid: { display: false },
+                            title: { display: true, text: 'Year' },
+                        },
+                        y: {
+                            stacked: true,
+                            min: 0,
+                            max: 100,
+                            ticks: { callback: function (v) { return v + '%'; } },
+                            title: { display: true, text: 'Allocation' },
+                        },
+                    },
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            mode: 'index',
+                            callbacks: {
+                                label: function (ctx) { return ' ' + ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(1) + '%'; },
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        try { renderChart(JSON.parse(chartContainer.dataset.chart)); } catch (e) {}
+
+        new MutationObserver(function (mutations) {
+            mutations.forEach(function (m) {
+                if (m.attributeName === 'data-chart') {
+                    try { renderChart(JSON.parse(chartContainer.dataset.chart)); } catch (e) {}
+                }
+            });
+        }).observe(chartContainer, { attributes: true });
+    })();
+</script>

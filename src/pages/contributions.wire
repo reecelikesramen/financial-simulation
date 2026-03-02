@@ -763,7 +763,7 @@ def toggle_filing_status():
                             <div style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">
                                 Percentage of income
                             </div>
-                            <div $if={annual_income.value * (contribution_401k_percent.value / 100.0) > 0} style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">{get_401k_contribution_status()}</div>
+                            <div $if={annual_income.value * (contribution_401k_percent.value / 100.0) > 0}><div style="margin-top: 0.3rem; font-size: 0.8rem; color: #666;">{get_401k_contribution_status()}</div></div>
                         </div>
 
                         <div style="background: #f8f9fa; padding: 0.75rem; border-radius: 6px;">
@@ -931,19 +931,19 @@ def toggle_filing_status():
                 <h2 style="margin: 0 0 1rem 0; color: #333; font-size: 1.1rem;">Summary</h2>
 
                 <div style="display: grid; gap: 0.75rem;">
-                    <div style="padding: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 6px; color: white;">
+                    <div style="padding: 1rem; background: linear-gradient(135deg, #4e62c8 0%, #8030b8 100%); border-radius: 6px; color: white;">
                         <div style="font-size: 0.85rem; opacity: 0.9;">Projected Balance at Retirement</div>
                         <div style="font-size: 2rem; font-weight: bold; margin: 0.25rem 0;">${'{:,.0f}'.format(calc_projected_balance_at_retirement())}</div>
                         <div style="font-size: 0.8rem; opacity: 0.8;">With {expected_investment_return.value}% annual returns</div>
                     </div>
 
-                    <div style="padding: 1rem; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); border-radius: 6px; color: white;">
+                    <div style="padding: 1rem; background: linear-gradient(135deg, #2868cc 0%, #0898a8 100%); border-radius: 6px; color: white;">
                         <div style="font-size: 0.85rem; opacity: 0.9;">Total Contributions</div>
                         <div style="font-size: 2rem; font-weight: bold; margin: 0.25rem 0;">${'{:,.0f}'.format(calc_total_saved_by_retirement())}</div>
                         <div style="font-size: 0.8rem; opacity: 0.8;">Without investment returns</div>
                     </div>
 
-                    <div style="padding: 1rem; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); border-radius: 6px; color: white;">
+                    <div style="padding: 1rem; background: linear-gradient(135deg, #28a860 0%, #108898 100%); border-radius: 6px; color: white;">
                         <div style="font-size: 0.85rem; opacity: 0.9; margin-bottom: 0.5rem;">Total Savings Rate</div>
                         {$if calc_years_to_retirement() > 0}
                         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
@@ -978,7 +978,7 @@ def toggle_filing_status():
                         <span style="font-weight: 600; font-size: 0.9rem;">${'{:,.0f}'.format(calc_total_401k_by_retirement())}</span>
                     </div>
                     <div style="height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden;">
-                        <div style="height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); width: {min(100, (calc_total_401k_by_retirement() / calc_projected_balance_at_retirement() * 100) if calc_projected_balance_at_retirement() > 0 else 0)}%;"></div>
+                        <div style="height: 100%; background: linear-gradient(90deg, #4e62c8, #8030b8); width: {min(100, (calc_total_401k_by_retirement() / calc_projected_balance_at_retirement() * 100) if calc_projected_balance_at_retirement() > 0 else 0)}%;"></div>
                     </div>
                 </div>
 
@@ -988,7 +988,7 @@ def toggle_filing_status():
                         <span style="font-weight: 600; font-size: 0.9rem;">${'{:,.0f}'.format(calc_total_roth_by_retirement())}</span>
                     </div>
                     <div style="height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden;">
-                        <div style="height: 100%; background: linear-gradient(90deg, #f093fb, #f5576c); width: {min(100, (calc_total_roth_by_retirement() / calc_projected_balance_at_retirement() * 100) if calc_projected_balance_at_retirement() > 0 else 0)}%;"></div>
+                        <div style="height: 100%; background: linear-gradient(90deg, #c038a8, #b82040); width: {min(100, (calc_total_roth_by_retirement() / calc_projected_balance_at_retirement() * 100) if calc_projected_balance_at_retirement() > 0 else 0)}%;"></div>
                     </div>
                 </div>
 
@@ -998,14 +998,14 @@ def toggle_filing_status():
                         <span style="font-weight: 600; font-size: 0.9rem;">${'{:,.0f}'.format(calc_total_hsa_by_retirement())}</span>
                     </div>
                     <div style="height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden;">
-                        <div style="height: 100%; background: linear-gradient(90deg, #4bc0c0, #36a2a2); width: {min(100, (calc_total_hsa_by_retirement() / calc_projected_balance_at_retirement() * 100) if calc_projected_balance_at_retirement() > 0 else 0)}%;"></div>
+                        <div style="height: 100%; background: linear-gradient(90deg, #28a860, #108898); width: {min(100, (calc_total_hsa_by_retirement() / calc_projected_balance_at_retirement() * 100) if calc_projected_balance_at_retirement() > 0 else 0)}%;"></div>
                     </div>
                 </div>
 
                 <div style="border-top: 1px solid #f0f0f0; padding-top: 0.75rem; margin-top: 0.75rem;">
                     <div style="display: flex; justify-content: space-between;">
                         <span style="font-weight: 600;">Total</span>
-                        <span style="font-weight: 700; font-size: 1.1rem; color: #667eea;">${'{:,.0f}'.format(calc_projected_balance_at_retirement())}</span>
+                        <span style="font-weight: 700; font-size: 1.1rem; color: #5568c0;">${'{:,.0f}'.format(calc_projected_balance_at_retirement())}</span>
                     </div>
                 </div>
             </div>
