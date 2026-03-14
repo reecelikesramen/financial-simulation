@@ -12,6 +12,8 @@ RUN uv sync --frozen
 # Copy application code and data
 COPY src/ ./src/
 COPY data/ ./data/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./
 
 EXPOSE 3000
 

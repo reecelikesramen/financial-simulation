@@ -4,6 +4,7 @@ __pycache__/
 .vscode
 *.egg-info/
 .env
+.claude/
 localhost.pem
 localhost-key.pem
 .pywire/
