@@ -228,6 +228,7 @@ def toggle_reimbursed(receipt):
 
 def handle_file_upload(event):
     """Receive base64 image data from JavaScript"""
+    print('heyo from file upload handler', event)
     try:
         data = json.loads(event.value)
         form_image_base64.value = data.get("base64", "")
@@ -838,6 +839,7 @@ document.addEventListener('change', async function(e) {
             // Dispatch to hidden input which triggers PyWire handler
             const hiddenInput = document.getElementById('file-upload-data');
             if (hiddenInput) {
+                hiddenInput.value = data;
                 const inputEvent = new Event('input', { bubbles: true });
                 Object.defineProperty(inputEvent, 'value', { value: data, writable: false });
                 hiddenInput.dispatchEvent(inputEvent);
