@@ -253,3 +253,120 @@ input.addEventListener('blur', function() {
 ## PyWire Context
 
 This project uses a new Python web framework that is not widespread on the internet and is likely missing from most LLM training datasets. Here is some information provided by the documentation at [nightly.pywire.dev/docs](https://nightly.pywire.dev/docs).
+
+### Components
+
+components guide (v0.1.9+)
+
+NOTE: there are some issues with components at this time. I'm mostly aware of the ones regarding hot reloading changes in dev and when navigating with PJAX enabled (where the browser doesn't do a hard load of the page, just navigates in-place), and spreading attributes not included in your props
+
+Defining Components
+Convention (not required but recommended)
+Keep components in a different tree than pages so they aren't accessible at their route, if your pages tree is src/pages/, put components under src/components/
+file name for components is snake_case, like advanced_button.wire this is automatically translated into a PascalCase import, so AdvancedButton
+use scoped style to segregate CSS specific to this component (also works for pages, layouts)
+@props class should always be called Props don't define multiple @props classes <-- this should give you an LSP error in vscode AND a compile error when you start the server
+I believe but could be wrong. props with snake_case names might be automatically converted to kebab-case when you provide them to a component (see below)
+
+#### Examples
+
+```pywire
+---
+# @props *should* be a default import, if not `from pywire import props`
+@props
+class Props:
+  card_title: str # automatically available as `card_title` in scope of this page, should see with python intellisense
+  action: Optional[str] = None # optional prop
+---
+<div class="card">
+  <h1>{card_title}</h1>
+  <div class="card-content">
+    <slot>
+      <!-- content inside <slot tag is default if no inner HTML is given to the component
+      <p>Lorem ipsum dolor...</p>
+    </slot>
+  </div>
+  {$if action}
+    <button>{action}
+  {/if}
+</div>
+
+<!-- scoped style ONLY applies to tags inside this component by using a hashing mechanism, will not pollute global style at all, need the `scoped` attribute for this to apply -->
+<style scoped>
+.card {
+  border: 1px solid black;
+  border-radius: 2px;
+  background-color: blue;
+}
+
+.card h1 {
+  font-size: 56px;
+  font-weight: 500;
+  color: #010101;
+}
+
+.card-content {
+  padding: 5px;
+  background-color: red;
+}
+</style>
+```
+
+```pywire
+---
+from components.my_component import MyComponent
+import markdown
+
+card_list = wire([{'title': 'Card 1', 'content': '**This is the first card** with some stuff', 'action': 'Like'}, {'title': 'Cool card', 'content': '### Some markdown content here!\nWow this is really cool markdown content maybe from a database or something?!?\n----\n[My link to stuff](https://google.com)'}])
+---
+
+<!-- not gonna go too in depth here since you know pages -->
+<div class="card-list">
+  {$for idx, card in enumerate(card_list), key=idx}
+    <!-- this is the important line, the HTML tag for your component matches the python import EXACTLY -->
+    <MyComponent card-title={card['title']} action={card.get('action')}>
+      {$if card['content']}
+        {$html markdown.render(card['content'])}
+      {/if}
+    </MyComponent>
+  {/for}
+</div>
+```
+
+```pywire
+---
+@props
+...
+
+# this exposes a method to the ref
+@expose
+def my_exposed_method():
+  print("You can do something with respect to *this* specific component")
+  print(f"This card's title: {title}")
+
+# this exposes a property to the ref
+@expose
+@property
+def llm_content() -> str:
+  return (title + action).trim().lower().to_utf8()
+---
+<!-- html... -->
+```
+
+```pywire
+---
+from components.my_component import MyComponent
+
+show = wire(False)
+my_ref = ref[MyComponent]() # brackets for typehints are optional
+---
+<div class="container>
+  <!-- $ref special attribute binds this component to that ref -->
+  <MyComponent card-title="My Title" action="Some action" $ref={my_ref} />
+  
+  <button @click={my_ref.my_exposed_method()}>Call the component ref's method</button>
+  
+  <button @click={show.value = True}>Print the component's property below:</button>
+  <p $if={show}>{my_ref.llm_content}</p>
+</div>
+```

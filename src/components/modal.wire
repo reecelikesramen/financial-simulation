@@ -1,0 +1,90 @@
+---
+# Reusable modal component.
+#
+# Usage (in a page):
+#   from components.modal import Modal
+#   modal_ref = ref[Modal]()
+#
+#   Open:  @click={modal_ref.open()}
+#   Close: onclick="window._closeModal();"
+#          (add @click={your_cleanup_fn()} alongside for any parent-side teardown)
+#
+# The slot receives the form/body content. The X button and backdrop click are
+# wired up internally. All close paths go through window._closeModal() so the
+# exit animation always plays before PyWire sees the state change.
+
+@props
+class Props:
+    pass
+
+show = wire(False)
+
+@expose
+def open():
+    show.value = True
+
+@expose
+def close():
+    show.value = False
+---
+
+<style scoped>
+@keyframes modal-overlay-in  { from { opacity:0; backdrop-filter:blur(0); } to { opacity:1; backdrop-filter:blur(7px); } }
+@keyframes modal-overlay-out { from { opacity:1; backdrop-filter:blur(7px); } to { opacity:0; backdrop-filter:blur(0); } }
+@keyframes modal-card-in  { from { opacity:0; transform:translateY(40px) scale(0.95); } to { opacity:1; transform:translateY(0) scale(1); } }
+@keyframes modal-card-out { from { opacity:1; transform:translateY(0) scale(1); } to { opacity:0; transform:translateY(-36px) scale(0.95); } }
+.modal-backdrop { animation: modal-overlay-in 0.28s ease forwards; -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px); }
+.modal-backdrop.closing { animation: modal-overlay-out 0.18s ease forwards; }
+.modal-card { animation: modal-card-in 0.42s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+.modal-card.closing { animation: modal-card-out 0.18s ease forwards; }
+</style>
+
+<!-- Backdrop — clicking outside the card closes the modal -->
+<div class="modal-backdrop"
+     style="display: {'flex' if show.value else 'none'}; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.55); z-index: 9999; align-items: center; justify-content: center;"
+     onmousedown="if(event.target===this)this.dataset.backdropDown='1';"
+     onclick="if(event.target===this&&this.dataset.backdropDown){window._closeModal();}delete this.dataset.backdropDown;">
+
+    <div class="modal-card"
+         style="background: var(--pico-card-background-color, white); padding: 2rem 2rem 0 2rem; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,0.45); position: relative;">
+
+        <!-- Hidden PyWire bridge: JS clicks this after the exit animation completes -->
+        <button id="modal-close-x" @click={close} style="display:none;"></button>
+
+        <!-- Visible X button -->
+        <button onclick="window._closeModal();"
+                style="position: absolute; top: 2rem; right: 2rem; background: none; border: none; font-size: 1.4rem; cursor: pointer; color: #666; line-height: 1; padding: 0.25rem 0.5rem;">&times;</button>
+
+        <slot />
+    </div>
+</div>
+
+<script>
+(function () {
+    window._closeModal = function () {
+        var backdrop = document.querySelector('.modal-backdrop');
+        var card = document.querySelector('.modal-card');
+        if (backdrop) backdrop.classList.add('closing');
+        if (card) card.classList.add('closing');
+        setTimeout(function () {
+            var trigger = document.getElementById('modal-close-x');
+            if (trigger) trigger.click();
+        }, 180);
+    };
+
+    // Reset animation classes when the modal re-opens
+    var backdrop = document.querySelector('.modal-backdrop');
+    if (backdrop) {
+        new MutationObserver(function (mutations) {
+            mutations.forEach(function (m) {
+                if (m.attributeName !== 'style') return;
+                if (backdrop.style.display === 'flex') {
+                    backdrop.classList.remove('closing');
+                    var card = backdrop.querySelector('.modal-card');
+                    if (card) card.classList.remove('closing');
+                }
+            });
+        }).observe(backdrop, { attributes: true, attributeFilter: ['style'] });
+    }
+})();
+</script>

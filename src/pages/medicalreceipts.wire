@@ -53,6 +53,8 @@ form_image_filename = wire("")
 show_modal = wire(False)
 edit_mode = wire(False)
 edit_id = wire("")
+show_confirm_modal = wire(False)
+pending_toggle_id = wire("")
 
 # Filter/sort state
 filter_status = wire("All")
@@ -232,6 +234,26 @@ def delete_receipt(receipt_id):
     except Exception:
         pass
     _reload_receipts()
+
+def open_confirm_toggle(receipt):
+    """Open confirmation modal before toggling reimbursement status"""
+    pending_toggle_id.value = receipt.get("id", "")
+    show_confirm_modal.value = True
+
+def close_confirm_modal():
+    show_confirm_modal.value = False
+    pending_toggle_id.value = ""
+
+def confirm_toggle():
+    """Confirmed — perform the toggle then close"""
+    id = pending_toggle_id.value
+    if not id:
+        show_confirm_modal.value = False
+        return
+    receipt = receipts.value.get(id, {})
+    toggle_reimbursed(receipt)
+    show_confirm_modal.value = False
+    pending_toggle_id.value = ""
 
 def toggle_reimbursed(receipt):
     """Toggle reimbursement status in database"""
@@ -470,7 +492,7 @@ def isReceiptsEmpty():
                         <td style="padding: 1rem; color: var(--pico-muted-color, #666); font-size: 1.05rem;">{receipt.get('description', '')}</td>
                         <td style="padding: 1rem; text-align: right; color: var(--pico-color, #212529); font-size: 1.05rem;">${'{:,.2f}'.format(receipt.get('amount', 0))}</td>
                         <td style="padding: 1rem; text-align: center; font-size: 1.05rem;">
-                            <span @click={toggle_reimbursed(receipt)} style="padding: 0.25rem 0.75rem; background: transparent; border: 1.5px solid {'#3d7a50' if receipt.get('reimbursed') else '#a06e18'}; color: {'#3d7a50' if receipt.get('reimbursed') else '#a06e18'}; border-radius: 12px; font-size: 0.85rem; font-weight: 500; cursor: pointer; user-select: none;">
+                            <span @click={open_confirm_toggle(receipt)} style="padding: 0.25rem 0.75rem; background: transparent; border: 1.5px solid {'#3d7a50' if receipt.get('reimbursed') else '#a06e18'}; color: {'#3d7a50' if receipt.get('reimbursed') else '#a06e18'}; border-radius: 12px; font-size: 0.85rem; font-weight: 500; cursor: pointer; user-select: none;">
                                 {'✓ Reimbursed' if receipt.get('reimbursed') else '⏳ Pending'}
                             </span>
                         </td>
@@ -646,6 +668,33 @@ def isReceiptsEmpty():
                 </button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- Reimbursement Confirmation Modal -->
+<div class="modal-backdrop"
+     style="display: {'flex' if show_confirm_modal.value else 'none'}; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.55); z-index: 9999; align-items: center; justify-content: center;"
+     onmousedown="if(event.target===this)this.dataset.backdropDown='1';"
+     onclick="if(event.target===this&&this.dataset.backdropDown){window._closeConfirmModal();}delete this.dataset.backdropDown;">
+    <div class="modal-card"
+         style="background: var(--pico-card-background-color, white); padding: 1rem 0.5rem; max-width: 400px; width: 90%; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,0.45); position: relative;">
+        <button id="confirm-modal-close-x" @click={close_confirm_modal} style="display:none;"></button>
+        <div style="display: grid; gap: 1.25rem; text-align: center;">
+            <h3 style="margin: 0; color: var(--pico-color, inherit); font-size: 1.3rem">Update Reimbursement Status</h3>
+            <p style="margin: 0; color: var(--pico-muted-color, #666);">
+                {('Mark this receipt as reimbursed?' if not receipts.value.get(pending_toggle_id.value, {}).get('reimbursed') else 'Mark this receipt as pending (undo reimbursement)?')}
+            </p>
+            <div style="display: flex; gap: 0.75rem; justify-content: center;">
+                <button type="button" onclick="window._closeConfirmModal();"
+                        style="padding: 0.6rem 1.25rem; background: var(--pico-secondary, #6c757d); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                    Cancel
+                </button>
+                <button type="button" @click={confirm_toggle()}
+                        style="padding: 0.6rem 1.25rem; background: #5568c0; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                    Confirm
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -928,6 +977,18 @@ function exportPDF() {
         input.dispatchEvent(ev);
     }, true);
 
+    window._closeConfirmModal = function () {
+        var backdrops = document.querySelectorAll('.modal-backdrop');
+        var confirmBackdrop = backdrops[backdrops.length - 1];
+        var confirmCard = confirmBackdrop && confirmBackdrop.querySelector('.modal-card');
+        if (confirmBackdrop) confirmBackdrop.classList.add('closing');
+        if (confirmCard) confirmCard.classList.add('closing');
+        setTimeout(function () {
+            var trigger = document.getElementById('confirm-modal-close-x');
+            if (trigger) trigger.click();
+        }, 175);
+    };
+
     window._closeModal = function () {
         var backdrop = document.querySelector('.modal-backdrop');
         var card = document.querySelector('.modal-card');
@@ -938,6 +999,19 @@ function exportPDF() {
             if (trigger) trigger.click();
         }, 175);
     };
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        var confirmBackdrop = document.getElementById('confirm-modal-close-x');
+        if (confirmBackdrop && confirmBackdrop.closest('.modal-backdrop').style.display === 'flex') {
+            window._closeConfirmModal();
+        } else {
+            var mainBackdrop = document.getElementById('modal-close-x');
+            if (mainBackdrop && mainBackdrop.closest('.modal-backdrop').style.display === 'flex') {
+                window._closeModal();
+            }
+        }
+    });
 
     // When the modal's display style changes, handle opening/animation states
     new MutationObserver(function (mutations) {
