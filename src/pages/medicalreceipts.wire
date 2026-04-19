@@ -47,7 +47,6 @@ form_hsa_eligible = wire(True)
 form_reimbursed = wire(False)
 form_image_base64 = wire("")
 form_image_thumbnail = wire("")
-form_image_filename = wire("")
 
 # UI state
 show_modal = wire(False)
@@ -131,7 +130,6 @@ def reset_form():
     form_reimbursed.value = False
     form_image_base64.value = ""
     form_image_thumbnail.value = ""
-    form_image_filename.value = ""
     form_error.value = ""
 
 # ===== CRUD OPERATIONS =====
@@ -246,12 +244,16 @@ def delete_receipt(receipt_id):
             row = session.get(_MedicalReceipt, receipt_id)
             if row:
                 session.delete(row)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Failed to delete receipt: {e}")
+        form_error.value = "Something went wrong deleting your receipt. Please try again."
+        return
     _reload_receipts()
 
 def open_confirm_toggle(receipt):
     """Open confirmation modal before toggling reimbursement status"""
+    if not receipt.get("hsa_eligible", True):
+        return
     pending_toggle_id.value = receipt.get("id", "")
     show_confirm_modal.value = True
 
@@ -295,7 +297,6 @@ def handle_file_upload(event):
         data = json.loads(event.value)
         form_image_base64.value = data.get("base64", "")
         form_image_thumbnail.value = data.get("thumbnail", "")
-        form_image_filename.value = data.get("filename", "")
     except:
         pass
 
@@ -303,11 +304,6 @@ def clear_image():
     """Remove uploaded image"""
     form_image_base64.value = ""
     form_image_thumbnail.value = ""
-    form_image_filename.value = ""
-
-def trigger_file_upload():
-    """JavaScript will handle this"""
-    pass
 
 # ===== SORTING =====
 
@@ -410,8 +406,8 @@ def get_reimbursed_percent():
         return 0
     return int((calc_total_reimbursed() / total) * 100)
 
-def isReceiptsEmpty():
-    return len(receipts.value) == 0    
+def is_receipts_empty():
+    return len(receipts.value) == 0
 ---
 <!-- Hidden input for file upload data -->
 <input id="file-upload-data" @input={handle_file_upload} style="display:none" />
@@ -534,7 +530,7 @@ def isReceiptsEmpty():
                 </tbody>
             </table>
 
-            <div $if={isReceiptsEmpty()}>
+            <div $if={is_receipts_empty()}>
                 <div style="padding: 3rem; text-align: center; color: var(--pico-muted-color, #666); background: var(--pico-card-background-color, #fff);">
                     <p style="font-size: 1.2rem; margin-bottom: 1rem;">No receipts found</p>
                     <p style="margin-bottom: 1.5rem;">Get started by adding your first medical receipt</p>
@@ -584,12 +580,6 @@ def isReceiptsEmpty():
         <button id="modal-close-x" @click={close_modal} style="display:none;"></button>
         <button onclick="window._closeModal();" style="position: absolute; top: 2rem; right: 2rem; background: none; border: none; font-size: 1.4rem; cursor: pointer; color: #666; line-height: 1; padding: 0.25rem 0.5rem;">&times;</button>
         <h2 style="margin-top: 0; color: var(--pico-color, inherit);">{edit_mode and 'Edit Receipt' or 'Add New Receipt'}</h2>
-
-        <!-- Error Message Display -->
-        <div $if={form_error}><div style="background: #a03040; border: 2px solid #7a2030; color: #fff; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.95rem;">
-            <strong style="font-weight: 600;">⚠️ Validation Error</strong>
-            <div style="margin-top: 0.5rem;">{form_error}</div>
-        </div></div>
 
         <form @submit.prevent={handle_form_submit}>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
@@ -698,7 +688,7 @@ def isReceiptsEmpty():
 
 <!-- Reimbursement Confirmation Modal -->
 <div class="modal-backdrop"
-     style="display: {'flex' if show_confirm_modal.value else 'none'}; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.55); z-index: 9999; align-items: center; justify-content: center;"
+     style="display: {'flex' if show_confirm_modal else 'none'}; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.55); z-index: 9999; align-items: center; justify-content: center;"
      onmousedown="if(event.target===this)this.dataset.backdropDown='1';"
      onclick="if(event.target===this&&this.dataset.backdropDown){window._closeConfirmModal();}delete this.dataset.backdropDown;">
     <div class="modal-card"
@@ -910,7 +900,7 @@ window.exportCSV = function() {
     const data = container && container.dataset.state;
     const anchor = document.getElementById('btn-export-csv').parentElement;
     if (!data) {
-        showPopup(anchor, 'No receipts to export');
+        window.showPopup(anchor, 'No receipts to export');
         return;
     }
 
@@ -918,7 +908,7 @@ window.exportCSV = function() {
     const receipts = Object.values(parsed.receipts || {});
 
     if (receipts.length === 0) {
-        showPopup(anchor, 'No receipts to export');
+        window.showPopup(anchor, 'No receipts to export');
         return;
     }
 
@@ -945,7 +935,7 @@ window.exportPDF = function() {
     const data = container && container.dataset.state;
     const anchor = document.getElementById('btn-export-pdf').parentElement;
     if (!data) {
-        showPopup(anchor, 'No receipts to export');
+        window.showPopup(anchor, 'No receipts to export');
         return;
     }
 
@@ -953,11 +943,15 @@ window.exportPDF = function() {
     const receipts = Object.values(parsed.receipts || {});
 
     if (receipts.length === 0) {
-        showPopup(anchor, 'No receipts to export');
+        window.showPopup(anchor, 'No receipts to export');
         return;
     }
 
     // Simple PDF export using browser print
+    function escapeHtml(str) {
+        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     const printWindow = window.open('', '_blank');
     printWindow.document.write('<html><head><title>Medical Receipts</title>');
     printWindow.document.write('<style>body { font-family: Arial, sans-serif; padding: 20px; } table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #ddd; padding: 8px; text-align: left; } th { background-color: #f2f2f2; }</style>');
@@ -967,9 +961,9 @@ window.exportPDF = function() {
 
     receipts.forEach(r => {
         printWindow.document.write(`<tr>
-            <td>${r.date || ''}</td>
-            <td>${r.provider || ''}</td>
-            <td>${r.description || ''}</td>
+            <td>${escapeHtml(r.date)}</td>
+            <td>${escapeHtml(r.provider)}</td>
+            <td>${escapeHtml(r.description)}</td>
             <td>$${(r.amount || 0).toFixed(2)}</td>
             <td>${r.reimbursed ? 'Reimbursed' : 'Pending'}</td>
         </tr>`);

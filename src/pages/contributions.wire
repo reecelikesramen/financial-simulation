@@ -642,11 +642,7 @@ def toggle_filing_status():
                             </span>
                         </label>
                         <div style="margin-top: 0.5rem; margin-left: 1.75rem; font-size: 0.8rem; color: #666; line-height: 1.4;">
-                            {$if filing_status_married.value}
                             Higher contribution limits.
-                            {$else}
-                            Uses single filer contribution limits.
-                            {/if}
                         </div>
                     </div>
 
@@ -663,7 +659,7 @@ def toggle_filing_status():
                             </span>
                         </label>
                         <div style="margin-top: 0.5rem; margin-left: 1.75rem; font-size: 0.8rem; color: #666; line-height: 1.4;">
-                            Limits increase by {limit_inflation_rate}% per year. This also applies to contributions excluding 401k.
+                            Limits increase by {limit_inflation_rate}% per year. This also applies to contributions.
                         </div>
                     </div>
                 </div>
