@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "A new pywire application"
 requires-python = ">=3.12"
 dependencies = [
-    "pywire==0.1.9",
     "stripe>=7.0.0",
     "sqlalchemy>=2.0.0",
     "yfinance>=0.2.0",
@@ -15,4 +14,10 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "itsdangerous>=2.0.0",
     "bcrypt>=4.0.0",
+    "pywire>=0.11.4",
+]
+
+[dependency-groups]
+dev = [
+    "pywire[cli]",
 ]

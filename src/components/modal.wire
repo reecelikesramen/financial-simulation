@@ -15,7 +15,7 @@
 
 @props
 class Props:
-    pass
+    children: Children
 
 show = wire(False)
 
@@ -31,7 +31,12 @@ def close():
 <style scoped>
 @keyframes modal-overlay-in  { from { opacity:0; backdrop-filter:blur(0); } to { opacity:1; backdrop-filter:blur(7px); } }
 @keyframes modal-overlay-out { from { opacity:1; backdrop-filter:blur(7px); } to { opacity:0; backdrop-filter:blur(0); } }
-@keyframes modal-card-in  { from { opacity:0; transform:translateY(40px) scale(0.95); } to { opacity:1; transform:translateY(0) scale(1); } }
+@keyframes modal-card-in {
+    0%   { opacity:0; transform:translateY(-56px) scale(0.93); }
+    60%  { opacity:1; transform:translateY(10px) scale(1.02); }
+    80%  { transform:translateY(-4px) scale(0.99); }
+    100% { transform:translateY(0) scale(1); }
+}
 @keyframes modal-card-out { from { opacity:1; transform:translateY(0) scale(1); } to { opacity:0; transform:translateY(-36px) scale(0.95); } }
 .modal-backdrop { animation: modal-overlay-in 0.28s ease forwards; -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px); }
 .modal-backdrop.closing { animation: modal-overlay-out 0.18s ease forwards; pointer-events: none; }
@@ -55,7 +60,7 @@ def close():
         <button onclick="window._closeModal();"
                 style="position: absolute; top: 2rem; right: 2rem; background: none; border: none; font-size: 1.4rem; cursor: pointer; color: #666; line-height: 1; padding: 0.25rem 0.5rem;">&times;</button>
 
-        <slot />
+        {$render children}
     </div>
 </div>
 

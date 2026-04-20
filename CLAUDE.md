@@ -1,206 +1,300 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working in this repo.
 
 ## Project Overview
 
-A financial simulation web application built with PyWire that visualizes historical stock market performance across countries, inflation data, and provides tools for retirement planning (contributions, withdrawals, medical receipts).
+PyWire app for financial simulation: historical stock/inflation data, retirement contribution planning, withdrawal strategy, HSA medical receipts. Uses local Postgres + Stripe-linked user/subscription models, optional auth middleware.
 
 ## Development Commands
 
 ```bash
-# Start all services via Docker Compose (http://localhost:3000, with hot-reload)
-# src/ is volume-mounted so PyWire detects changes without rebuilding
-cp .env.example .env  # set POSTGRES_PASSWORD, then:
+# Docker Compose (http://localhost:3000, hot-reload, src/ mounted)
+cp .env.example .env  # set POSTGRES_PASSWORD
 source .env
 docker compose up -d --build
 
-# Alternatively, run the PyWire app locally without database/auth (http://localhost:3000)
+# Local, no DB/auth (https://localhost:8765 with local mkcert cert)
 uv sync
 uv run pywire dev
 ```
 
-The Docker image uses `pywire dev --no-tui --host 0.0.0.0 --reload` and serves over plain HTTP (no mkcert). Do not add mkcert to the Dockerfile — the container-generated certificate won't be trusted by the host browser.
+The Docker image uses `pywire dev --no-tui --host 0.0.0.0 --reload` over plain HTTP. **Do not add mkcert to the Dockerfile** — the container-generated cert won't be trusted by the host browser.
 
 ## Architecture
 
 ### PyWire Framework
 
-This project uses **PyWire**, a Python web framework with path-based routing. Key concepts:
+- **Pages**: `src/pages/*.wire` — routes auto-derived from filename
+- **Components**: `src/components/*.wire` — snake_case filename → PascalCase import (`modal.wire` → `Modal`)
+- **Layouts**: `__layout__.wire` wraps its sibling/descendant pages. Slot via `{$render children}`
+- **Error page**: `__error__.wire` renders on exceptions
+- **PJAX**: enabled in `main.py` — SPA-like partial updates via WebSocket
 
-- **Pages directory**: `src/pages/` - routes are automatically mapped from file structure
-- **`.wire` files**: Combine Python logic and HTML templates in a single file
-  - Python code goes at the top (before `--- html ---`)
-  - HTML goes after the `--- html ---` separator
-  - Python variables can be interpolated into HTML using `{variable_name}` syntax
-- **Layouts**: `__layout__.wire` files define templates for nested routes
-  - `src/pages/__layout__.wire` - root layout with navigation
-  - `src/pages/dashboard/__layout__.wire` - dashboard-specific layout
-  - Child pages are inserted via `<slot />` tag
-- **PJAX enabled**: Partial page updates for faster navigation (configured in [main.py:6](src/main.py#L6))
+### `.wire` File Structure
 
-### Route Structure
+```pywire
+---
+# Frontmatter — Python module scope (imports, wires, derived, functions, @props)
+from pywire import wire, derived
 
-```text
-/                   -> src/pages/index.wire (landing page with feature cards)
-/globalmarket       -> src/pages/globalmarket.wire (country stock market data)
-/contributions      -> src/pages/contributions.wire (retirement contributions)
-/withdrawals        -> src/pages/withdrawals.wire (retirement withdrawals)
-/medicalreceipts    -> src/pages/medicalreceipts.wire (HSA receipts)
-/pricing           -> src/pages/pricing.wire
-/login             -> src/pages/login.wire
-/dashboard/*       -> src/pages/dashboard/ (protected area)
+count = wire(0)
+
+@derived
+def doubled():
+    return count.value * 2
+
+def increment(event):
+    count.value += 1
+---
+<!-- Template — HTML + pywire directives -->
+<button @click={increment}>Count: {count.value}, doubled: {doubled.value}</button>
+
+<style scoped>
+button { font-size: 1rem; }
+</style>
 ```
 
-### Data Layer
+Single `---` line opens and closes frontmatter. **No `--- html ---` separator** — that's a doc error from old CLAUDE memory.
 
-**Financial data utilities** ([financial_data.py](src/financial_data.py)):
+### Routes
 
-- Fetches stock market data via yfinance API (`get_sp500_returns`, `get_us_total_market_returns`, `get_global_market_returns`)
-- Provides inflation data with fallback to hardcoded values (`get_inflation_data`)
-- Returns data as `{dates: [], values: []}` with compounded values starting at 1.0
-
-**World Bank data utilities** ([worldbank_data.py](src/worldbank_data.py)):
-
-- Loads S&P Global Equity Indices from CSV file in `data/` directory
-- Provides country-specific stock market returns (`get_country_stock_returns`)
-- Lists 84+ countries with available data (`get_available_countries`)
-- Default focus countries defined in `DEFAULT_COUNTRIES` list
-
-**Database models** ([models.py](src/models.py)):
-
-- SQLAlchemy ORM with declarative base
-- `User` model: email, created_at
-- `Subscription` model: user_id, stripe_customer_id, status (linked to Stripe integration)
+```text
+/                 -> src/pages/index.wire
+/globalmarket     -> src/pages/globalmarket.wire
+/contributions    -> src/pages/contributions.wire
+/withdrawals      -> src/pages/withdrawals.wire
+/medicalreceipts  -> src/pages/medicalreceipts.wire
+/pricing          -> src/pages/pricing.wire
+/login            -> src/pages/login.wire
+```
 
 ### Application Entry Point
 
-[main.py](src/main.py) creates the PyWire application instance with:
+[src/main.py](src/main.py) constructs `PyWire(enable_pjax=True, debug=True, middleware=auth_middleware_stack())`. The `middleware` kwarg takes a Starlette-style list: bare classes or `(cls, kwargs)` tuples. Order is outermost-first.
 
-- Pages directory: `src/pages`
-- PJAX enabled for SPA-like behavior
-- Debug mode on
+### Auth
 
-## Data Files
+[src/auth_middleware.py](src/auth_middleware.py) declares `SessionMiddleware` + `AuthMiddleware` explicitly.
 
-World Bank stock market data is stored in `data/API_CM.MKT.INDX.ZG_DS2_en_csv_v2_10345.csv` containing S&P Global Equity Indices (annual percentage changes) for 84+ countries from 1960-2024.
+**Why explicit**: PyWire only auto-installs `SessionMiddleware` when `interactive_server_mode=False`. Interactive mode (default) keeps session state in the WebSocket — HTTP scope has no `scope["session"]` unless you add it yourself.
 
-## Styling
+`AuthMiddleware` reads `scope["session"]["user_id"]` and writes to the `current_user_id` ContextVar (see [src/context.py](src/context.py)) so `.wire` pages can `from context import current_user_id`.
 
-Uses Pico CSS (minimal classless CSS framework) loaded from CDN in the root layout.
+Alternative (not used here): `pywire_auth.connect_auth(app, ...)` auto-installs PyWire's own `SessionMiddleware` + `AuthMiddleware` + routes + policy engine. Use it if/when migrating off the DIY stack.
 
-## Page-Specific Notes
+### Data Layer
 
-### [withdrawals.wire](src/pages/withdrawals.wire)
+- [src/financial_data.py](src/financial_data.py): yfinance-backed returns + inflation fallback. Returns `{dates: [], values: []}` with compounded values starting at 1.0.
+- [src/worldbank_data.py](src/worldbank_data.py): S&P Global Equity Indices CSV loader. ~84 countries, 1960–2024.
+- [src/models.py](src/models.py): SQLAlchemy ORM. `User` (email, created_at), `Subscription` (user_id, stripe_customer_id, status).
 
-- Reactive state: `stocks_balance`, `bonds_balance`, `bills_balance` (all `wire(0.0)`)
-- `calc_chart_data()` returns JSON for a stacked percentage bar chart projected over 20 years using per-asset return rates (`STOCKS_RETURN=0.10`, `BONDS_RETURN=0.04`, `BILLS_RETURN=0.015`)
-- Chart uses Chart.js 4.4.1 with `type: 'bar'`, `stacked: true`, Y-axis 0–100%
-- Dollar inputs use the focus/blur/comma-formatting pattern (see PyWire Patterns below)
+### Data Files
 
-### [index.wire](src/pages/index.wire)
+`data/API_CM.MKT.INDX.ZG_DS2_en_csv_v2_10345.csv` — World Bank S&P Global Equity Indices annual % changes.
 
-- Feature card gradients use the darker palette from `contributions.wire` (not the bright pastels)
-- Colors: Global Market `#4e62c8→#8030b8`, Contributions `#c038a8→#b82040`, Withdrawals `#2868cc→#0898a8`, Medical `#28a860→#108898`
+### Styling
 
-### [contributions.wire](src/pages/contributions.wire)
+Pico CSS (classless) from CDN, loaded in `__layout__.wire`.
 
-- Most complex page; the dollar input pattern, deferred PyWire update pattern, and chart integration pattern all originate here — reference it first when building similar functionality
+## PyWire Patterns
 
-## PyWire Patterns (Learned from This Project)
+### Reactive State
 
-### Function Calls in Templates
+- `wire(v)` → reactive cell. Read/write via `.value`
+- `@derived` → cached computed cell; returns a `Derived` instance. Read via `.value`
+- Plain `def` frontmatter functions → auto-called by the compiler in template expressions. `{func}` runs `func()`
 
-Always call functions **with parentheses** in HTML attribute bindings:
+### Template Expression Rules
 
-```html
-<!-- CORRECT — explicitly calls the function -->
-<div data-chart={calc_chart_data()}>
+| Frontmatter | Template | Renders |
+|---|---|---|
+| `x = wire(5)` | `{x.value}` | `5` |
+| `@derived def doubled(): ...` | `{doubled.value}` | computed |
+| `@derived def doubled(): ...` | `{doubled}` | compile error — it's an instance |
+| `def fmt(): return "..."` | `{fmt}` | auto-called |
+| `def fmt(): return "..."` | `{fmt()}` | also works |
 
-<!-- WRONG — renders the bound method object as a string e.g. "<bound method ...>" -->
-<div data-chart={calc_chart_data}>
-```
+Rule of thumb: `@derived` → always `.value`. Plain defs → either `{func}` or `{func()}`.
 
-### Accessing Variables Inside Methods
+### Attribute Bindings
 
-Class-level non-wire variables (e.g. `current_age = 45`) are **not accessible by name** from inside PyWire methods. Either inline the values or compute them locally:
+`data-chart={calc_chart_data.value}` — binds a string, JSON, etc. into an attribute.
 
-```python
-# BAD — years_to_retirement is a class-level var, not accessible in a method
-def calc_chart_data():
-    years = list(range(2026, 2026 + years_to_retirement))  # NameError
+### Events
 
-# GOOD — compute inline
-def calc_chart_data():
-    n_years = 65 - 45
-    years = list(range(datetime.now().year, datetime.now().year + n_years))
-```
+- **DOM events on regular HTML**: `@click`, `@input`, `@submit`, etc. Handler receives an `event` with `.value`, `.target`, etc.
+- **Component callbacks**: use `on_` prop convention, typed `EventHandler[...]`. `@event` is DOM-only.
 
-Wire variables (`wire()`) ARE accessible normally via `.value`.
+### Slots / Children
 
-### Chart.js Integration (`$permanent` + MutationObserver)
+Both layouts and components use `Children` + `{$render children}`:
 
-The standard pattern for reactive charts across all pages:
-
-```html
-<!-- In HTML: $permanent prevents PyWire from wiping the canvas;
-     data-chart={func()} updates the attribute on every reactive change -->
-<div $permanent id="chart-container" data-chart={calc_chart_data()}>
-    <canvas id="myChart"></canvas>
+```pywire
+---
+@props
+class Props:
+    children: Children
+---
+<div class="modal">
+  {$render children}
 </div>
 ```
 
-```javascript
-// In JS: read initial data, then watch for attribute changes
-const container = document.getElementById('chart-container');
-const chart = new Chart(ctx, { /* init with JSON.parse(container.dataset.chart) */ });
+### `$permanent`
 
-new MutationObserver(mutations => {
-    mutations.forEach(m => {
-        if (m.attributeName === 'data-chart') {
-            const data = JSON.parse(container.dataset.chart);
-            // update chart.data.datasets[n].data = data.field
-            chart.update();
-        }
-    });
-}).observe(container, { attributes: true });
-```
+Marks an element whose subtree PyWire will NOT morph across updates. Useful for Chart.js canvases, third-party widget roots, etc. Attributes on the element itself **do** still update — that's how the MutationObserver chart pattern works.
 
-- `$permanent` stops PyWire patching children, but PyWire **still updates attributes** on the element itself
-- Always use Chart.js `animation: false` with this pattern to avoid jank on reactive updates
+Scripts **inside** a `$permanent` element are skipped on re-execution (they already ran once).
 
-### PJAX and Script Execution
+### Chart.js Integration
 
-With PJAX enabled, navigating between pages does **not** trigger a full page reload. Consequences:
+```html
+<div $permanent id="chart-container" data-chart={calc_chart_data.value}>
+  <canvas id="myChart"></canvas>
+</div>
 
-- `window.addEventListener('load', ...)` — **will NOT fire** on PJAX navigation; scripts using this will silently not run after the first page load
-- `document.addEventListener('DOMContentLoaded', ...)` — same problem
-- **IIFEs** `(function() { ... })()` — **DO work** because script tags are re-executed when injected via PJAX fetch
-
-Always wrap page scripts in an IIFE:
-
-```javascript
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
-    (function () {
-        // runs correctly on both initial load and PJAX navigation
-    })();
+  (() => {
+    const container = document.getElementById('chart-container');
+    if (!container) return;
+    const prior = Chart.getChart(document.getElementById('myChart'));
+    if (prior) prior.destroy();
+    const chart = new Chart(document.getElementById('myChart'), {
+      type: 'line',
+      data: JSON.parse(container.dataset.chart),
+      options: { animation: false, responsive: true },
+    });
+    new MutationObserver(muts => {
+      muts.forEach(m => {
+        if (m.attributeName === 'data-chart') {
+          const d = JSON.parse(container.dataset.chart);
+          chart.data = d; chart.update();
+        }
+      });
+    }).observe(container, { attributes: true });
+  })();
 </script>
 ```
 
+Notes:
+- Always `Chart.getChart(canvas).destroy()` before `new Chart(...)` — hot-reload and SPA-nav-back both leave stale instances.
+- `animation: false` avoids jank on each reactive update.
+- Non-async `<script src>` before an inline script now blocks correctly on SPA nav (fixed in pywire ≥ commit that lands after 0.11.0). So Chart.js CDN + inline init works first time.
+
+### Scripts and PyWire Interop
+
+PyWire extracts every `<script>` tag from incoming HTML before morphdom runs, then re-executes them in order afterwards. Every SPA navigation *and* every region update re-runs the inline scripts on the page. Two consequences drive the rules below:
+
+1. Scripts run multiple times per session. They must be idempotent.
+2. Page content is delivered via WebSocket and fed through the client DOM diff — the browser doesn't parse a fresh document, and the usual lifecycle events don't fire.
+
+#### Always-apply rules
+
+- **Wrap everything in an IIFE.** Top-level `let`/`const` in inline scripts would leak into global scope and collide on the next run.
+  ```html
+  <script>(() => { /* page code */ })();</script>
+  ```
+- **Pick unique identifiers.** If you have two `<script>` blocks on a page, each IIFE has its own scope, but any identifier you write to `window` or expose globally (helpers like `exportCSV`, event-listener wrappers) must be unique per-page.
+- **Don't rely on `DOMContentLoaded` or `window.load`.** They do not fire on SPA nav. Use the lifecycle events below.
+- **Query the DOM fresh on every run.** Don't cache element references in outer closures across updates — the element may have been morphed.
+
+#### Lifecycle events (dispatched on the morph target)
+
+| Event | When | Typical use |
+|---|---|---|
+| `pywire:preupdate` | before morphdom | capture animation/scroll state, cancel transitions |
+| `pywire:update` | per morphed element | re-init a widget on a specific node |
+| `pywire:postupdate` | after morph + scripts ran | global reinit that depends on DOM being settled |
+| `pywire:navigate` | SPA nav only (not per-state-change) | analytics pings, history-only side effects |
+
+```js
+document.addEventListener('pywire:postupdate', () => { /* re-bind */ });
+```
+
+#### Guard against double-init (the Chart.js trap)
+
+Region updates re-run your script even when the target DOM survived via `$permanent`. Calling `new Chart(canvas, ...)` twice throws `Canvas is already in use`. Guard at the top of every widget init:
+
+```js
+(() => {
+  const canvas = document.getElementById('myChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  if (Chart.getChart(canvas)) return;   // <-- already initialized, bail
+  // ... new Chart(canvas, ...)
+})();
+```
+
+The first-run IIFE typically sets up a `MutationObserver` on the `$permanent` container's `data-chart` attribute; that observer stays alive across updates, so later script runs have nothing to do.
+
+#### `$permanent` interaction
+
+- DOM subtree is preserved across morphs.
+- Scripts **inside** a `$permanent` element run **once** and are skipped on subsequent re-executions (pywire flags them via `data-pw-permanent`).
+- Attributes on the `$permanent` element itself still update — that's how reactive values reach preserved widgets (e.g. `data-chart={calc_chart_data.value}`).
+
+#### `<script src="...">` execution order
+
+PyWire sequences non-async `<script src>` loads before subsequent inline scripts on SPA nav (pywire ≥ 0.11.3). Rule of thumb:
+
+- `<script src="cdn">` followed by `<script>init code</script>` — works first time on SPA nav; the inline script runs after the CDN script finishes loading.
+- Add `async` to a `<script src>` only if the subsequent inline script doesn't need it.
+- `<script type="module">` does **NOT** re-execute on SPA nav (browser spec limits — modules are cached by specifier). Prefer classic scripts or move module init into a `pywire:postupdate` handler.
+
+#### Strings that look like structural HTML tags
+
+Inline scripts can safely embed `'</head>'`, `'</body>'`, `'<style>'`, or `'<title>'` as string literals — pywire's server-side tag injectors skip `<script>`/`<style>`/`<textarea>`/`<title>` bodies when looking for injection points (pywire ≥ 0.11.3).
+
+The one string that's still dangerous is a literal `</script>`, because the HTML parser terminates the `<script>` element on sight. Split it with string concatenation:
+
+```js
+printWindow.document.write('<' + '/script>');   // survives the HTML parser
+```
+
+#### Capture-phase interception
+
+When you want to stop PyWire from seeing a DOM event, register a capture-phase listener and call `e.stopImmediatePropagation()` in it. This is the basis of the dollar-input deferred-update pattern.
+
+```js
+input.addEventListener('input', function (e) {
+    if (e.isFinalUpdate) return;
+    // your local handling here
+    e.stopImmediatePropagation();
+}, true);  // <-- capture phase is required
+```
+
+### `<style scoped>`
+
+Scoped styles get a `data-ph-{hash}` attribute appended to each selector in the rule set. `@keyframes`, `@font-face`, etc. are emitted verbatim (global). Nested at-rules (`@media`, `@supports`, `@container`, `@layer`) recurse.
+
+Rule: put page-specific animations in `<style scoped>` alongside their usage. Cross-page/shared animations belong in a component's own scoped style or in the global layout.
+
+### `{$head} ... {/head}`
+
+Frontmatter-driven `<head>` contributions from pages or components:
+
+```pywire
+{$head}
+  <link rel="stylesheet" href="/static/chart-extras.css">
+  <meta name="description" content="Withdrawal planning">
+{/head}
+```
+
+Appended to the document head. Use this instead of manually injecting into `<head>` via JS.
+
 ### Dollar Input Pattern (Deferred PyWire Updates)
 
-For currency inputs that format with commas and only send updates to PyWire on blur:
-
-**HTML:**
+Currency inputs that display comma-formatted and only push to PyWire on blur.
 
 ```html
 <input type="text" class="dollar-input" data-initial-value={my_wire.value}
-       placeholder="0" @input={my_handler} style="..." />
+       placeholder="0" @input={my_handler} />
 ```
 
-- Use `type="text"` not `type="number"` — number inputs reject comma-formatted values
+- `type="text"` not `type="number"` — number inputs reject comma-formatted values.
 
-**Python handler** must strip commas before parsing:
+Python handler strips commas:
 
 ```python
 def my_handler(event):
@@ -210,163 +304,99 @@ def my_handler(event):
         my_wire.value = 0.0
 ```
 
-**JavaScript** (two-pass over `.dollar-input` elements):
+JS: two passes in an IIFE.
 
-1. **Focus/blur formatting**: on focus move current value to `placeholder`, clear field; on blur restore or reformat with commas
-2. **Capture-phase interception**: intercept all `input` events before PyWire sees them (`e.stopImmediatePropagation()` in capture phase), do live comma formatting locally, then on blur dispatch a synthetic `isFinalUpdate` event that PyWire processes
+1. **Focus/blur UX**: on focus stash current value in `placeholder`, clear field; on blur reformat with commas.
+2. **Capture-phase input interception**: stop PyWire from seeing keystroke events, then on blur dispatch a synthetic `input` marked `isFinalUpdate` that PyWire does process.
 
-```javascript
-// Pass 1: focus/blur UX
-input.addEventListener('focus', function() {
-    this.dataset.oldValue = this.value;
-    this.placeholder = this.value || '0';
-    this.value = '';
-});
-input.addEventListener('blur', function() {
-    if (this.value === '' && this.dataset.oldValue) this.value = this.dataset.oldValue;
-    else if (this.value) {
-        const n = parseInt(this.value.replace(/[^\d]/g, ''), 10);
-        this.value = n > 0 ? n.toLocaleString('en-US') : '';
-    }
-    delete this.dataset.oldValue;
-});
+See [src/pages/contributions.wire](src/pages/contributions.wire) for the canonical implementation.
 
-// Pass 2: defer PyWire update to blur
-let pending = false;
-input.addEventListener('input', function(e) {
-    if (e.isFinalUpdate) return;
-    // ... live comma formatting ...
-    pending = true;
-    e.stopImmediatePropagation();  // block PyWire from seeing this event
-}, true);  // <-- capture phase is required
+## Page-Specific Notes
 
-input.addEventListener('blur', function() {
-    if (pending) {
-        pending = false;
-        const ev = new Event('input', { bubbles: true });
-        ev.isFinalUpdate = true;
-        this.dispatchEvent(ev);  // now PyWire processes it
-    }
-});
-```
+### [contributions.wire](src/pages/contributions.wire)
 
-## PyWire Context
+Most complex page in the repo. Reference it first for: dollar-input pattern, deferred PyWire-update pattern, Chart.js integration with MutationObserver on `data-chart`, collapsible detail sections with `@click` toggles.
 
-This project uses a new Python web framework that is not widespread on the internet and is likely missing from most LLM training datasets. Here is some information provided by the documentation at [nightly.pywire.dev/docs](https://nightly.pywire.dev/docs).
+### [withdrawals.wire](src/pages/withdrawals.wire)
 
-### Components
+- Single reactive `assets_json = wire(json.dumps([...]))` stores the whole asset list as JSON. Add/remove/edit rows are done JS-side, then synced via a hidden `<input>` that dispatches an `input` event.
+- Chart: stacked line, Y-axis 0–100%, projects 20 years forward using per-asset `return_rate`.
 
-components guide (v0.1.9+)
+### [index.wire](src/pages/index.wire)
 
-NOTE: there are some issues with components at this time. I'm mostly aware of the ones regarding hot reloading changes in dev and when navigating with PJAX enabled (where the browser doesn't do a hard load of the page, just navigates in-place), and spreading attributes not included in your props
+Feature-card gradients use the darker palette from `contributions.wire`: Global Market `#4e62c8→#8030b8`, Contributions `#c038a8→#b82040`, Withdrawals `#2868cc→#0898a8`, Medical `#28a860→#108898`.
 
-Defining Components
-Convention (not required but recommended)
-Keep components in a different tree than pages so they aren't accessible at their route, if your pages tree is src/pages/, put components under src/components/
-file name for components is snake_case, like advanced_button.wire this is automatically translated into a PascalCase import, so AdvancedButton
-use scoped style to segregate CSS specific to this component (also works for pages, layouts)
-@props class should always be called Props don't define multiple @props classes <-- this should give you an LSP error in vscode AND a compile error when you start the server
-I believe but could be wrong. props with snake_case names might be automatically converted to kebab-case when you provide them to a component (see below)
+### [medicalreceipts.wire](src/pages/medicalreceipts.wire)
 
-#### Examples
+Self-contained inline modal (does NOT use `components/modal.wire`). Its own keyframes live in its scoped `<style>` block — don't dedupe them into `modal.wire` since the pages are independent.
+
+## Components
+
+### Defining
 
 ```pywire
 ---
-# @props *should* be a default import, if not `from pywire import props`
+from pywire import props, expose
+
 @props
 class Props:
-  card_title: str # automatically available as `card_title` in scope of this page, should see with python intellisense
-  action: Optional[str] = None # optional prop
+    card_title: str
+    action: Optional[str] = None
+    children: Children            # slot content
+    on_click: Optional[EventHandler[dict]] = None  # callback prop convention
 ---
 <div class="card">
   <h1>{card_title}</h1>
-  <div class="card-content">
-    <slot>
-      <!-- content inside <slot tag is default if no inner HTML is given to the component
-      <p>Lorem ipsum dolor...</p>
-    </slot>
-  </div>
-  {$if action}
-    <button>{action}
-  {/if}
+  <div class="card-content">{$render children}</div>
+  {$if action}<button @click={on_click}>{action}</button>{/if}
 </div>
 
-<!-- scoped style ONLY applies to tags inside this component by using a hashing mechanism, will not pollute global style at all, need the `scoped` attribute for this to apply -->
 <style scoped>
-.card {
-  border: 1px solid black;
-  border-radius: 2px;
-  background-color: blue;
-}
-
-.card h1 {
-  font-size: 56px;
-  font-weight: 500;
-  color: #010101;
-}
-
-.card-content {
-  padding: 5px;
-  background-color: red;
-}
+.card { border: 1px solid black; }
 </style>
 ```
 
+Conventions:
+- Always exactly one `@props` class, always named `Props`. LSP + compiler enforce it.
+- Snake_case props (`card_title`) are passed as kebab-case in HTML (`card-title`).
+- `@event` decorator is **DOM-only** (for `@click` handlers inside an element). For component callback props, use `on_<name>: EventHandler[T]`.
+
+### Using
+
 ```pywire
 ---
 from components.my_component import MyComponent
-import markdown
 
-card_list = wire([{'title': 'Card 1', 'content': '**This is the first card** with some stuff', 'action': 'Like'}, {'title': 'Cool card', 'content': '### Some markdown content here!\nWow this is really cool markdown content maybe from a database or something?!?\n----\n[My link to stuff](https://google.com)'}])
+ref_a = ref[MyComponent]()
 ---
+<MyComponent card-title="Hi" $ref={ref_a}>
+  <p>child content</p>
+</MyComponent>
 
-<!-- not gonna go too in depth here since you know pages -->
-<div class="card-list">
-  {$for idx, card in enumerate(card_list), key=idx}
-    <!-- this is the important line, the HTML tag for your component matches the python import EXACTLY -->
-    <MyComponent card-title={card['title']} action={card.get('action')}>
-      {$if card['content']}
-        {$html markdown.render(card['content'])}
-      {/if}
-    </MyComponent>
-  {/for}
-</div>
+<button @click={ref_a.my_exposed_method()}>Call method</button>
 ```
 
-```pywire
----
-@props
-...
+### Exposing Methods / Properties
 
-# this exposes a method to the ref
+```pywire
 @expose
 def my_exposed_method():
-  print("You can do something with respect to *this* specific component")
-  print(f"This card's title: {title}")
+    ...
 
-# this exposes a property to the ref
 @expose
 @property
 def llm_content() -> str:
-  return (title + action).trim().lower().to_utf8()
----
-<!-- html... -->
+    return "..."
 ```
 
-```pywire
----
-from components.my_component import MyComponent
+Accessed via the parent's `ref[Component]()` binding.
 
-show = wire(False)
-my_ref = ref[MyComponent]() # brackets for typehints are optional
----
-<div class="container>
-  <!-- $ref special attribute binds this component to that ref -->
-  <MyComponent card-title="My Title" action="Some action" $ref={my_ref} />
-  
-  <button @click={my_ref.my_exposed_method()}>Call the component ref's method</button>
-  
-  <button @click={show.value = True}>Print the component's property below:</button>
-  <p $if={show}>{my_ref.llm_content}</p>
-</div>
-```
+### Known Issues
+
+- Hot reload of component changes sometimes requires a full browser reload.
+- PJAX-nav away-and-back into a page using a component can leave stale state — hard-reload to recover.
+- Spreading unknown attributes through to the root element doesn't always work — declare every attribute you want to accept explicitly in `Props`.
+
+## PyWire Context
+
+PyWire is a relatively new framework and is likely under-represented in LLM training data. When in doubt, consult [nightly.pywire.dev/docs](https://nightly.pywire.dev/docs) or check `packages/pywire/` in the sibling monorepo at `~/projects/pywire-monorepo`.

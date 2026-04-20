@@ -11,14 +11,12 @@ all_countries = get_available_countries()
 
 # Fetch stock market data for all countries that have data
 countries_data = {}
-all_dates_sets = [set(inflation_data['dates'])]
 
 for country in all_countries:
     try:
         country_data = get_country_stock_returns(country, years=20)
         if country_data and country_data['dates']:
             countries_data[country] = country_data
-            all_dates_sets.append(set(country_data['dates']))
     except Exception as e:
         pass
 
@@ -88,7 +86,7 @@ countries_json = json.dumps(filtered_countries_data)
 
     <div style="margin-bottom: 3rem;">
         <h2>Compounded Growth Across <span id="countryCount">{len(filtered_countries_data)}</span> Countries</h2>
-        <div style="position: relative; height: 600px;">
+        <div style="position: relative; height: 600px;" $permanent>
             <canvas id="combinedChart"></canvas>
         </div>
     </div>
@@ -96,7 +94,13 @@ countries_json = json.dumps(filtered_countries_data)
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
-    window.addEventListener('load', function() {
+    (() => {
+        // Destroy previous chart if exists in DOM
+        const canvas = document.getElementById('combinedChart');
+        if (!canvas || typeof Chart === 'undefined') return;
+        const prior = Chart.getChart(canvas);
+        if (prior) prior.destroy();
+
         // Parse data from Python
         const chartDataEl = document.getElementById('chart-data');
         const inflationData = JSON.parse(chartDataEl.dataset.inflation);
@@ -446,5 +450,5 @@ countries_json = json.dumps(filtered_countries_data)
             document.getElementById('countryCount').textContent = visibleCount;
             chart.update();
         });
-    });
+    })();
 </script>

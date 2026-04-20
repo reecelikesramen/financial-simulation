@@ -556,7 +556,7 @@ def is_receipts_empty():
     </div>
 </div>
 
-<style>
+<style scoped>
     @keyframes modal-overlay-in  { from { opacity:0; backdrop-filter:blur(0); } to { opacity:1; backdrop-filter:blur(7px); } }
     @keyframes modal-overlay-out { from { opacity:1; backdrop-filter:blur(7px); } to { opacity:0; backdrop-filter:blur(0); } }
     @keyframes modal-card-in {

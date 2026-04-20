@@ -1,4 +1,8 @@
 from pywire import PyWire
-from auth_middleware import create_app_with_middleware
+from auth_middleware import auth_middleware_stack
 
-app = create_app_with_middleware(PyWire(enable_pjax=True, debug=True))
+app = PyWire(
+    enable_pjax=True,
+    debug=True,
+    middleware=auth_middleware_stack(),
+)
